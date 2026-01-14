@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: LifePlanner Local API (Conceptual)
+  version: 1.0.0
+  description: |
+    Local contracts describing plugin commands and data operations.
+servers:
+  - url: http://localhost
+paths:
+  /goals:
+    get:
+      summary: List goals
+      responses:
+        "200":
+          description: Goal list
+    post:
+      summary: Create goal
+      responses:
+        "201":
+          description: Goal created
+  /goals/{goalId}:
+    get:
+      summary: Get goal details
+      parameters:
+        - name: goalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Goal detail
+    put:
+      summary: Update goal
+      parameters:
+        - name: goalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Goal updated
+    delete:
+      summary: Delete goal
+      parameters:
+        - name: goalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Goal deleted
+  /tasks:
+    get:
+      summary: List tasks
+      responses:
+        "200":
+          description: Task list
+    post:
+      summary: Create task from goal
+      responses:
+        "201":
+          description: Task created
+  /tasks/{taskId}:
+    put:
+      summary: Update task
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task updated
+  /weekly-plans:
+    get:
+      summary: Get weekly plan
+      responses:
+        "200":
+          description: Weekly plan detail
+    put:
+      summary: Save weekly plan
+      responses:
+        "200":
+          description: Weekly plan saved
+  /inbox-items:
+    get:
+      summary: List inbox items
+      responses:
+        "200":
+          description: Inbox list
+    post:
+      summary: Add inbox item
+      responses:
+        "201":
+          description: Inbox item created
+  /inbox-items/{itemId}/triage:
+    post:
+      summary: Triage inbox item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Inbox item triaged
+  /exercises:
+    get:
+      summary: List exercises
+      responses:
+        "200":
+          description: Exercise list
+    post:
+      summary: Create exercise
+      responses:
+        "201":
+          description: Exercise created

@@ -1,0 +1,62 @@
+|   0 | 1       |   2 |   3 |   4 | 5                      |   6 |   7 |   8 |   9 |   10 |   11 |   12 |   13 |   14 |   15 |   16 |   17 |   18 | 19                        |
+|----:|:--------|----:|----:|----:|:-----------------------|----:|----:|----:|----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|:--------------------------|
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | 5ヵ年計画   | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | ビジネス                   | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | プライベート                    |
+|     |         |     |     |     | (仕事、収入、地位、人間関係、能力等の状態) |     |     |     |     |      |      |      |      |      |      |      |      |      | (住居、家族、余暇時間、地域社会との関係等の状態) |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | 1年後     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+|     | (　　　歳)  |     |     |     |                        |     |     |     |     |      |      |      |      |      |      |      |      |      |                           |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | 3年後     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+|     | (　　　歳)  |     |     |     |                        |     |     |     |     |      |      |      |      |      |      |      |      |      |                           |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | 5年後     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+|     | (　　　歳)  |     |     |     |                        |     |     |     |     |      |      |      |      |      |      |      |      |      |                           |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | nan     | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |
+| nan | ブレイクダウン | nan | nan | nan | nan                    | nan | nan | nan | nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan |  nan | nan                       |

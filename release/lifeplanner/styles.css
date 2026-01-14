@@ -1,0 +1,664 @@
+.lifeplanner-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lifeplanner-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lifeplanner-nav button {
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.lifeplanner-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+.lifeplanner-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lifeplanner-form input,
+.lifeplanner-form select,
+.lifeplanner-form textarea {
+  width: 100%;
+}
+
+.lifeplanner-weekly-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.lifeplanner-weekly-slot,
+.lifeplanner-goals-section,
+.lifeplanner-inbox-row,
+.lifeplanner-exercises-item {
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.lifeplanner-weekly-review {
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.lifeplanner-weekly-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lifeplanner-weekly-slot-header input {
+  max-width: 90px;
+}
+
+.lifeplanner-goals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lifeplanner-goal-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.lifeplanner-goal-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.lifeplanner-goal-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeplanner-goal-drag-handle {
+  cursor: grab;
+  user-select: none;
+  color: var(--text-muted);
+}
+
+.lifeplanner-goal-drag-handle:active {
+  cursor: grabbing;
+}
+
+.lifeplanner-goal-title {
+  flex: 1;
+}
+
+.lifeplanner-goal-card.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--text-accent);
+}
+
+.lifeplanner-goal-card.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--text-accent);
+}
+
+.lifeplanner-goal-card.is-dragging {
+  opacity: 0.6;
+}
+
+.lifeplanner-goal-card .lifeplanner-goal-meta {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.lifeplanner-goal-children {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lifeplanner-goal-menu {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.lifeplanner-goal-menu button {
+  cursor: pointer;
+}
+
+.lifeplanner-goal-root-drop {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px 10px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  text-align: left;
+}
+
+.lifeplanner-goal-root-label {
+  font-size: 0.9em;
+  text-align: center;
+}
+
+.lifeplanner-goal-root-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.lifeplanner-goal-root-drop.is-drop {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
+.lifeplanner-goal-menu-list {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 28px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 120px;
+  z-index: 10;
+}
+
+.lifeplanner-goal-menu-list.is-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lifeplanner-inbox-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeplanner-inbox-controls button {
+  margin-right: 6px;
+}
+
+.lifeplanner-goal-desc {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.lifeplanner-exercises-item textarea {
+  width: 100%;
+  min-height: 120px;
+}
+
+.lifeplanner-exercises-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lifeplanner-exercises-tab {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.lifeplanner-exercises-tab.is-active {
+  background: var(--text-accent);
+  border-color: var(--text-accent);
+  color: var(--text-on-accent);
+}
+
+.lifeplanner-exercises-content {
+  margin-top: 10px;
+}
+
+.lifeplanner-exercises-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.lifeplanner-exercises-grid.is-vertical {
+  grid-template-columns: 1fr;
+}
+
+.lifeplanner-exercises-question {
+  font-weight: 600;
+}
+
+.lifeplanner-exercises-answer {
+  width: 100%;
+  min-height: 80px;
+}
+
+.lifeplanner-table-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.lifeplanner-table-grid {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+}
+
+.lifeplanner-table-cell {
+  padding: 4px;
+}
+
+.lifeplanner-table-header {
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.lifeplanner-table-cell input,
+.lifeplanner-table-cell select {
+  width: 100%;
+}
+
+.lifeplanner-table-cell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.lifeplanner-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lifeplanner-quotes-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--background-secondary);
+}
+
+.lifeplanner-quotes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.lifeplanner-quotes-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr);
+  gap: 6px;
+}
+
+.lifeplanner-weekly-top {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.lifeplanner-weekly-goals {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--background-secondary);
+}
+
+.lifeplanner-weekly-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--background-secondary);
+  margin-top: 12px;
+}
+
+.lifeplanner-weekly-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lifeplanner-action-plan-section .lifeplanner-weekly-section-header {
+  align-items: baseline;
+}
+
+.lifeplanner-action-plan-hint {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.lifeplanner-weekly-section-header input {
+  max-width: 320px;
+}
+
+.lifeplanner-weekly-section textarea {
+  width: 100%;
+  max-width: 720px;
+}
+
+.lifeplanner-weekly-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lifeplanner-weekly-list-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.lifeplanner-weekly-list-actions {
+  margin-top: 6px;
+}
+
+.lifeplanner-action-plan-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 28px;
+  gap: 12px;
+  align-items: center;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-left: 4px solid var(--text-accent);
+  border-radius: 12px;
+  padding: 12px 12px 12px 10px;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.06);
+}
+
+.lifeplanner-action-plan-row select {
+  width: 100%;
+}
+
+.lifeplanner-action-plan-section .lifeplanner-weekly-list {
+  gap: 10px;
+}
+
+.lifeplanner-action-plan-list {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 10px;
+  list-style: none;
+  margin: 0;
+}
+
+.lifeplanner-action-plan-task-row {
+  grid-template-columns: 26px minmax(0, 220px) minmax(0, 1fr) 28px;
+}
+
+.lifeplanner-action-plan-checkbox {
+  width: 16px;
+  height: 16px;
+}
+
+.lifeplanner-action-plan-select {
+  min-height: 32px;
+}
+
+.lifeplanner-action-plan-input {
+  min-height: 32px;
+  width: 100%;
+}
+
+.lifeplanner-action-plan-remove {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+}
+
+.lifeplanner-action-plan-remove:hover {
+  border-color: var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.lifeplanner-routine-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lifeplanner-routine-row {
+  display: grid;
+  grid-template-columns: 2.2fr repeat(6, 0.35fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.lifeplanner-routine-row.is-header {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.lifeplanner-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lifeplanner-role-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--background-primary);
+}
+
+.lifeplanner-role-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.lifeplanner-weekly-reflection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.lifeplanner-weekly-reflection-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--background-primary);
+}
+
+.lifeplanner-daily-memos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.lifeplanner-daily-memo-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--background-primary);
+}
+
+.lifeplanner-daily-memo-card.is-today {
+  border-color: var(--text-accent);
+  box-shadow: 0 0 0 1px var(--text-accent);
+}
+
+.lifeplanner-daily-memo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.lifeplanner-daily-memo-date {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.lifeplanner-kanban {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.lifeplanner-kanban-column {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--background-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+}
+
+.lifeplanner-kanban-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lifeplanner-kanban-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.lifeplanner-kanban-list.is-drop {
+  outline: 2px dashed var(--text-accent);
+  border-radius: 8px;
+}
+
+.lifeplanner-kanban-empty {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.lifeplanner-kanban-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lifeplanner-kanban-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lifeplanner-kanban-card-menu {
+  position: relative;
+}
+
+.lifeplanner-kanban-menu-list {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 24px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 120px;
+  z-index: 10;
+}
+
+.lifeplanner-kanban-menu-list.is-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lifeplanner-kanban-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.lifeplanner-kanban-body {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.lifeplanner-goals-form-wrap {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.lifeplanner-goals-form-toggle {
+  cursor: pointer;
+}
+
+.lifeplanner-goals-form {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px;
+  min-width: 320px;
+  z-index: 10;
+}
+
+.lifeplanner-goals-form.is-collapsed {
+  display: none;
+}
+
+.lifeplanner-form-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeplanner-form-row textarea,
+.lifeplanner-form-row input,
+.lifeplanner-form-row select {
+  width: 100%;
+}

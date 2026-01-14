@@ -1,0 +1,9 @@
+{
+  "id": "lifeplanner",
+  "name": "LifePlanner",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Weekly-first Franklin-style planning inside Obsidian.",
+  "author": "ctake3",
+  "authorUrl": ""
+}
