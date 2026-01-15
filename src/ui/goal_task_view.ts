@@ -25,8 +25,16 @@ export class GoalTaskView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     const repository = new MarkdownRepository(this.plugin.app);
-    this.goalsService = new GoalsService(repository, this.plugin.settings.storageDir);
-    this.tasksService = new TasksService(repository, this.plugin.settings.storageDir);
+    this.goalsService = new GoalsService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    this.tasksService = new TasksService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
   }
 
   getViewType(): string {
@@ -43,7 +51,7 @@ export class GoalTaskView extends ItemView {
 
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "アクションプラン" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, GOAL_TASK_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
 

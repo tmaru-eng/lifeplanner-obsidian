@@ -132,7 +132,8 @@ export class ExercisesView extends ItemView {
     this.plugin = plugin;
     this.exercisesService = new ExercisesService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
 
@@ -150,7 +151,7 @@ export class ExercisesView extends ItemView {
 
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "演習" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, EXERCISES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
 
@@ -277,7 +278,8 @@ export class ExercisesView extends ItemView {
       sectionDef.tableType,
       sectionDef.title,
       sectionDef.columns,
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
     const actions = container.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = actions.createEl("button", { text: "追加" });

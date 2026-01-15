@@ -12,13 +12,20 @@ export class InboxTriage {
   private repository: MarkdownRepository;
   private baseDir: string;
   private weekStart: "monday" | "sunday";
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, baseDir: string, weekStart: "monday" | "sunday") {
+  constructor(
+    repository: MarkdownRepository,
+    baseDir: string,
+    weekStart: "monday" | "sunday",
+    defaultTags: string[]
+  ) {
     this.repository = repository;
     this.baseDir = baseDir;
     this.weekStart = weekStart;
-    this.goalsService = new GoalsService(repository, baseDir);
-    this.tasksService = new TasksService(repository, baseDir);
+    this.defaultTags = defaultTags;
+    this.goalsService = new GoalsService(repository, baseDir, defaultTags);
+    this.tasksService = new TasksService(repository, baseDir, defaultTags);
   }
 
   async toGoal(item: InboxItem): Promise<void> {
@@ -35,7 +42,7 @@ export class InboxTriage {
     const content = await this.repository.read(path);
     const plan = content ? parseWeeklyPlan(content) : emptyPlan();
     plan.actionPlans.push({ title: item.content, done: false });
-    await this.repository.write(path, serializeWeeklyPlan(plan));
+    await this.repository.write(path, serializeWeeklyPlan(plan, this.defaultTags));
   }
 }
 

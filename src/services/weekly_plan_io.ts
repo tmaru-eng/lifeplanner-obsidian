@@ -1,10 +1,11 @@
 import { Task } from "../models/task";
 import { RoleGoals, RoutineAction, WeeklyPlan, WeeklyPlanSlot } from "../models/weekly_plan";
+import { prependTagFrontmatter } from "./markdown_tags";
 
 const DAYS = ["月", "火", "水", "木", "金", "土", "日"];
 const ROUTINE_DAYS = ["月", "火", "水", "木", "金", "土"];
 
-export function serializeWeeklyPlan(plan: WeeklyPlan): string {
+export function serializeWeeklyPlan(plan: WeeklyPlan, defaultTags: string[] = []): string {
   const lines: string[] = [];
   lines.push("# 週間計画");
   lines.push("");
@@ -90,7 +91,7 @@ export function serializeWeeklyPlan(plan: WeeklyPlan): string {
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 export function parseWeeklyPlan(content: string): WeeklyPlan {

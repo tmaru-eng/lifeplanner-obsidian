@@ -28,6 +28,44 @@ var import_obsidian11 = require("obsidian");
 // src/ui/exercises_view.ts
 var import_obsidian2 = require("obsidian");
 
+// src/services/markdown_tags.ts
+function normalizeTags(rawTags) {
+  if (!rawTags || rawTags.length === 0) {
+    return [];
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const normalized = [];
+  for (const raw of rawTags) {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const cleaned = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+    if (!cleaned) {
+      continue;
+    }
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(cleaned);
+  }
+  return normalized;
+}
+function prependTagFrontmatter(lines, rawTags) {
+  const tags = normalizeTags(rawTags);
+  if (tags.length === 0) {
+    return lines;
+  }
+  const frontmatter = ["---", "tags:"];
+  tags.forEach((tag) => {
+    frontmatter.push(`  - ${tag}`);
+  });
+  frontmatter.push("---", "");
+  return [...frontmatter, ...lines];
+}
+
 // src/storage/path_resolver.ts
 var TEMPLATE_PREFIX = "LifePlanner";
 function resolveLifePlannerPath(type, baseDir = "LifePlanner") {
@@ -54,15 +92,16 @@ function normalizeBaseDir(value) {
 
 // src/services/exercises_service.ts
 var ExercisesService = class {
-  constructor(repository, baseDir) {
+  constructor(repository, baseDir, defaultTags) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async loadSections(sectionDefs) {
     const resolved = resolveLifePlannerPath("Exercises", this.baseDir);
     const content = await this.repository.read(resolved);
     if (!content) {
-      const seed = serializeSections(sectionDefs, {});
+      const seed = serializeSections(sectionDefs, {}, this.defaultTags);
       await this.repository.write(resolved, seed);
       return buildSectionMap(sectionDefs, {});
     }
@@ -71,7 +110,7 @@ var ExercisesService = class {
     return buildSectionMap(sectionDefs, normalized);
   }
   async saveSections(sectionDefs, sections) {
-    const content = serializeSections(sectionDefs, sections);
+    const content = serializeSections(sectionDefs, sections, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Exercises", this.baseDir), content);
   }
 };
@@ -102,7 +141,7 @@ function parseSections(content) {
   flush();
   return sections;
 }
-function serializeSections(sectionDefs, sections) {
+function serializeSections(sectionDefs, sections, defaultTags = []) {
   const lines = [];
   lines.push("# Exercises");
   lines.push("");
@@ -117,7 +156,7 @@ function serializeSections(sectionDefs, sections) {
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 function buildSectionMap(sectionDefs, parsed) {
   const result = {};
@@ -219,12 +258,13 @@ var MarkdownRepository = class {
 
 // src/services/table_section_service.ts
 var TableSectionService = class {
-  constructor(repository, type, title, columns, baseDir) {
+  constructor(repository, type, title, columns, baseDir, defaultTags) {
     this.repository = repository;
     this.type = type;
     this.title = title;
     this.columns = columns;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async loadRows() {
     const content = await this.repository.read(resolveLifePlannerPath(this.type, this.baseDir));
@@ -255,7 +295,7 @@ var TableSectionService = class {
       });
     }
     lines.push("");
-    return lines.join("\n");
+    return prependTagFrontmatter(lines, this.defaultTags).join("\n");
   }
 };
 function parseTable(content) {
@@ -289,24 +329,74 @@ var PROMISE_VIEW_TYPE = "lifeplanner-promise";
 var VALUES_VIEW_TYPE = "lifeplanner-values";
 
 // src/ui/navigation.ts
-var NAV_ITEMS = [
-  { label: "\u9031\u9593\u8A08\u753B", viewType: WEEKLY_PLAN_VIEW_TYPE },
-  { label: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3", viewType: GOAL_TASK_VIEW_TYPE },
-  { label: "\u30A4\u30B7\u30E5\u30FC", viewType: ISSUES_VIEW_TYPE },
-  { label: "Inbox", viewType: INBOX_VIEW_TYPE },
-  { label: "\u76EE\u6A19", viewType: GOALS_VIEW_TYPE },
-  { label: "\u30DF\u30C3\u30B7\u30E7\u30F3", viewType: MISSION_VIEW_TYPE },
-  { label: "\u4FA1\u5024\u89B3", viewType: VALUES_VIEW_TYPE },
-  { label: "Have/Do/Be", viewType: HAVE_DO_BE_VIEW_TYPE },
-  { label: "\u7D04\u675F", viewType: PROMISE_VIEW_TYPE },
-  { label: "\u6F14\u7FD2", viewType: EXERCISES_VIEW_TYPE }
-];
-function renderNavigation(container, onNavigate) {
-  const nav = container.createEl("div", { cls: "lifeplanner-nav" });
-  for (const item of NAV_ITEMS) {
-    const button = nav.createEl("button", { text: item.label });
-    button.addEventListener("click", () => onNavigate(item.viewType));
+var NAV_GROUPS = [
+  {
+    id: "operations",
+    label: "\u65E5\u5E38",
+    items: [
+      { label: "\u9031\u9593\u8A08\u753B", viewType: WEEKLY_PLAN_VIEW_TYPE },
+      { label: "Inbox", viewType: INBOX_VIEW_TYPE },
+      { label: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3", viewType: GOAL_TASK_VIEW_TYPE },
+      { label: "\u30A4\u30B7\u30E5\u30FC", viewType: ISSUES_VIEW_TYPE },
+      { label: "\u76EE\u6A19", viewType: GOALS_VIEW_TYPE },
+      { label: "\u7D04\u675F", viewType: PROMISE_VIEW_TYPE }
+    ]
+  },
+  {
+    id: "foundation",
+    label: "\u5185\u7701",
+    items: [
+      { label: "\u30DF\u30C3\u30B7\u30E7\u30F3", viewType: MISSION_VIEW_TYPE },
+      { label: "\u4FA1\u5024\u89B3", viewType: VALUES_VIEW_TYPE },
+      { label: "Have/Do/Be", viewType: HAVE_DO_BE_VIEW_TYPE },
+      { label: "\u6F14\u7FD2", viewType: EXERCISES_VIEW_TYPE }
+    ]
   }
+];
+var VIEW_GROUP_MAP = /* @__PURE__ */ new Map();
+NAV_GROUPS.forEach((group) => {
+  group.items.forEach((item) => {
+    VIEW_GROUP_MAP.set(item.viewType, group.id);
+  });
+});
+var lastVisitedByGroup = {};
+function resolveGroup(viewType) {
+  const groupId = VIEW_GROUP_MAP.get(viewType);
+  return NAV_GROUPS.find((group) => group.id === groupId) ?? NAV_GROUPS[0];
+}
+function renderNavigation(container, activeViewType, onNavigate) {
+  const nav = container.createEl("div", { cls: "lifeplanner-nav" });
+  const activeGroup = resolveGroup(activeViewType);
+  lastVisitedByGroup[activeGroup.id] = activeViewType;
+  const groupRow = nav.createEl("div", { cls: "lifeplanner-nav-groups" });
+  NAV_GROUPS.forEach((group) => {
+    const button = groupRow.createEl("button", {
+      text: group.label,
+      cls: "lifeplanner-nav-group"
+    });
+    button.setAttr("type", "button");
+    if (group.id === activeGroup.id) {
+      button.classList.add("is-active");
+      button.setAttr("aria-current", "page");
+    }
+    button.addEventListener("click", () => {
+      const target = lastVisitedByGroup[group.id] ?? group.items[0]?.viewType ?? activeViewType;
+      onNavigate(target);
+    });
+  });
+  const tabRow = nav.createEl("div", { cls: "lifeplanner-nav-tabs" });
+  activeGroup.items.forEach((item) => {
+    const button = tabRow.createEl("button", {
+      text: item.label,
+      cls: "lifeplanner-nav-tab"
+    });
+    button.setAttr("type", "button");
+    if (item.viewType === activeViewType) {
+      button.classList.add("is-active");
+      button.setAttr("aria-current", "page");
+    }
+    button.addEventListener("click", () => onNavigate(item.viewType));
+  });
 }
 
 // src/ui/exercises_view.ts
@@ -416,7 +506,8 @@ var ExercisesView = class extends import_obsidian2.ItemView {
     this.plugin = plugin;
     this.exercisesService = new ExercisesService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
   getViewType() {
@@ -430,7 +521,7 @@ var ExercisesView = class extends import_obsidian2.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "\u6F14\u7FD2" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, EXERCISES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
@@ -536,7 +627,8 @@ var ExercisesView = class extends import_obsidian2.ItemView {
       sectionDef.tableType,
       sectionDef.title,
       sectionDef.columns,
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
     const actions = container.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
@@ -633,21 +725,22 @@ var LEVEL_ORDER = [
   "\u9031\u9593"
 ];
 var GoalsService = class {
-  constructor(repository, baseDir) {
+  constructor(repository, baseDir, defaultTags) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async listGoals() {
     const path = resolveLifePlannerPath("Goals", this.baseDir);
     const content = await this.repository.read(path);
     if (!content) {
-      await this.repository.write(path, serializeGoals([]));
+      await this.repository.write(path, serializeGoals([], this.defaultTags));
       return [];
     }
     const goals = parseGoals(content);
     const idLines = content.match(/^ID:/gm)?.length ?? 0;
     if (goals.length > 0 && idLines < goals.length) {
-      await this.repository.write(path, serializeGoals(goals));
+      await this.repository.write(path, serializeGoals(goals, this.defaultTags));
     }
     return goals;
   }
@@ -696,7 +789,7 @@ var GoalsService = class {
     await this.saveGoals(cleaned);
   }
   async saveGoals(goals) {
-    const content = serializeGoals(goals);
+    const content = serializeGoals(goals, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Goals", this.baseDir), content);
   }
 };
@@ -807,7 +900,7 @@ ${line.trim()}` : line.trim();
   }
   return goals;
 }
-function serializeGoals(goals) {
+function serializeGoals(goals, defaultTags = []) {
   const lines = [];
   lines.push("# \u76EE\u6A19\u30B4\u30FC\u30EB");
   lines.push("");
@@ -849,14 +942,15 @@ function serializeGoals(goals) {
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 // src/services/tasks_service.ts
 var TasksService = class {
-  constructor(repository, baseDir) {
+  constructor(repository, baseDir, defaultTags) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async listTasks() {
     const content = await this.repository.read(resolveLifePlannerPath("Tasks", this.baseDir));
@@ -878,7 +972,7 @@ var TasksService = class {
     return task;
   }
   async saveTasks(tasks) {
-    const content = serializeTasks(tasks);
+    const content = serializeTasks(tasks, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Tasks", this.baseDir), content);
   }
 };
@@ -910,7 +1004,7 @@ function parseTasks(content) {
   }
   return tasks;
 }
-function serializeTasks(tasks) {
+function serializeTasks(tasks, defaultTags = []) {
   const lines = [];
   lines.push("# \u76EE\u6A19\u304B\u3089\u30BF\u30B9\u30AF\u5207\u308A\u51FA\u3057");
   lines.push("");
@@ -927,7 +1021,7 @@ function serializeTasks(tasks) {
     }
   }
   lines.push("");
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 // src/ui/goal_task_view.ts
@@ -941,8 +1035,16 @@ var GoalTaskView = class extends import_obsidian3.ItemView {
     this.saveTimer = null;
     this.plugin = plugin;
     const repository = new MarkdownRepository(this.plugin.app);
-    this.goalsService = new GoalsService(repository, this.plugin.settings.storageDir);
-    this.tasksService = new TasksService(repository, this.plugin.settings.storageDir);
+    this.goalsService = new GoalsService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    this.tasksService = new TasksService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
   }
   getViewType() {
     return GOAL_TASK_VIEW_TYPE;
@@ -955,7 +1057,7 @@ var GoalTaskView = class extends import_obsidian3.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, GOAL_TASK_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-goal-task-status" });
@@ -1110,7 +1212,8 @@ var GoalsView = class extends import_obsidian4.ItemView {
     this.plugin = plugin;
     this.goalsService = new GoalsService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
   getViewType() {
@@ -1124,7 +1227,7 @@ var GoalsView = class extends import_obsidian4.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "\u76EE\u6A19" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, GOALS_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     const formWrap = view.createEl("div", { cls: "lifeplanner-goals-form-wrap" });
@@ -1781,9 +1884,10 @@ var import_obsidian5 = require("obsidian");
 
 // src/services/inbox_service.ts
 var InboxService = class {
-  constructor(repository, baseDir) {
+  constructor(repository, baseDir, defaultTags) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async listItems() {
     const content = await this.repository.read(resolveLifePlannerPath("Inbox", this.baseDir));
@@ -1810,7 +1914,7 @@ var InboxService = class {
     await this.saveItems(remaining);
   }
   async saveItems(items) {
-    const content = serializeInboxItems(items);
+    const content = serializeInboxItems(items, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Inbox", this.baseDir), content);
   }
 };
@@ -1832,7 +1936,7 @@ function parseInboxItems(content) {
   }
   return items;
 }
-function serializeInboxItems(items) {
+function serializeInboxItems(items, defaultTags = []) {
   const lines = [];
   lines.push("# Inbox");
   lines.push("");
@@ -1845,13 +1949,13 @@ function serializeInboxItems(items) {
     }
   }
   lines.push("");
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 // src/services/weekly_plan_io.ts
 var DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
 var ROUTINE_DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
-function serializeWeeklyPlan(plan) {
+function serializeWeeklyPlan(plan, defaultTags = []) {
   const lines = [];
   lines.push("# \u9031\u9593\u8A08\u753B");
   lines.push("");
@@ -1937,7 +2041,7 @@ function serializeWeeklyPlan(plan) {
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 function parseWeeklyPlan(content) {
   const slots = DAYS.map((day) => ({ day, entries: [] }));
@@ -2066,12 +2170,13 @@ function parseWeeklyPlan(content) {
 
 // src/services/inbox_triage.ts
 var InboxTriage = class {
-  constructor(repository, baseDir, weekStart) {
+  constructor(repository, baseDir, weekStart, defaultTags) {
     this.repository = repository;
     this.baseDir = baseDir;
     this.weekStart = weekStart;
-    this.goalsService = new GoalsService(repository, baseDir);
-    this.tasksService = new TasksService(repository, baseDir);
+    this.defaultTags = defaultTags;
+    this.goalsService = new GoalsService(repository, baseDir, defaultTags);
+    this.tasksService = new TasksService(repository, baseDir, defaultTags);
   }
   async toGoal(item) {
     await this.goalsService.addGoal("\u9031\u9593", item.content);
@@ -2085,7 +2190,7 @@ var InboxTriage = class {
     const content = await this.repository.read(path);
     const plan = content ? parseWeeklyPlan(content) : emptyPlan();
     plan.actionPlans.push({ title: item.content, done: false });
-    await this.repository.write(path, serializeWeeklyPlan(plan));
+    await this.repository.write(path, serializeWeeklyPlan(plan, this.defaultTags));
   }
 };
 function emptyPlan() {
@@ -2133,11 +2238,16 @@ var InboxView = class extends import_obsidian5.ItemView {
     this.statusEl = null;
     this.plugin = plugin;
     const repository = new MarkdownRepository(this.plugin.app);
-    this.inboxService = new InboxService(repository, this.plugin.settings.storageDir);
+    this.inboxService = new InboxService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
     this.inboxTriage = new InboxTriage(
       repository,
       this.plugin.settings.storageDir,
-      this.plugin.settings.weekStart
+      this.plugin.settings.weekStart,
+      this.plugin.settings.defaultTags
     );
   }
   getViewType() {
@@ -2151,7 +2261,7 @@ var InboxView = class extends import_obsidian5.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "Inbox" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, INBOX_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     const form = view.createEl("div", { cls: "lifeplanner-inbox-form lifeplanner-form" });
@@ -2229,25 +2339,26 @@ var import_obsidian6 = require("obsidian");
 
 // src/services/issues_service.ts
 var IssuesService = class {
-  constructor(repository, baseDir) {
+  constructor(repository, baseDir, defaultTags) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async listIssues() {
     const path = resolveLifePlannerPath("Issues", this.baseDir);
     const content = await this.repository.read(path);
     if (!content) {
-      await this.repository.write(path, serializeIssues([]));
+      await this.repository.write(path, serializeIssues([], this.defaultTags));
       return [];
     }
     return parseIssues(content);
   }
   async saveIssues(issues) {
-    const content = serializeIssues(issues);
+    const content = serializeIssues(issues, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Issues", this.baseDir), content);
   }
 };
-function serializeIssues(issues) {
+function serializeIssues(issues, defaultTags = []) {
   const lines = [];
   lines.push("# Issues");
   lines.push("");
@@ -2284,7 +2395,7 @@ function serializeIssues(issues) {
       lines.push("");
     }
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 function parseIssues(content) {
   const issues = [];
@@ -2365,8 +2476,16 @@ var IssuesView = class extends import_obsidian6.ItemView {
     this.handleMenuClose = null;
     this.plugin = plugin;
     const repo = new MarkdownRepository(this.plugin.app);
-    this.issuesService = new IssuesService(repo, this.plugin.settings.storageDir);
-    this.goalsService = new GoalsService(repo, this.plugin.settings.storageDir);
+    this.issuesService = new IssuesService(
+      repo,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    this.goalsService = new GoalsService(
+      repo,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
   }
   getViewType() {
     return ISSUES_VIEW_TYPE;
@@ -2379,7 +2498,7 @@ var IssuesView = class extends import_obsidian6.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "\u30A4\u30B7\u30E5\u30FC" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, ISSUES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-issues-status" });
@@ -2637,11 +2756,12 @@ var import_obsidian7 = require("obsidian");
 
 // src/services/simple_section_service.ts
 var SimpleSectionService = class {
-  constructor(repository, type, title, baseDir) {
+  constructor(repository, type, title, baseDir, defaultTags) {
     this.repository = repository;
     this.type = type;
     this.title = title;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
   async load() {
     const content = await this.repository.read(resolveLifePlannerPath(this.type, this.baseDir));
@@ -2664,7 +2784,7 @@ var SimpleSectionService = class {
       lines.push("- ");
     }
     lines.push("");
-    return lines.join("\n");
+    return prependTagFrontmatter(lines, this.defaultTags).join("\n");
   }
   parse(content) {
     const lines = content.split("\n");
@@ -2699,7 +2819,8 @@ var SimpleSectionView = class extends import_obsidian7.ItemView {
       new MarkdownRepository(this.plugin.app),
       type,
       titleText,
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
   getDisplayText() {
@@ -2713,7 +2834,7 @@ var SimpleSectionView = class extends import_obsidian7.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: this.titleText });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, this.viewType, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
@@ -2757,7 +2878,8 @@ var TableSectionView = class extends import_obsidian8.ItemView {
       type,
       titleText,
       columns,
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
   getViewType() {
@@ -2771,7 +2893,7 @@ var TableSectionView = class extends import_obsidian8.ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: this.titleText });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, this.viewType, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
@@ -2879,7 +3001,7 @@ var import_obsidian9 = require("obsidian");
 
 // src/services/weekly_shared_io.ts
 var ROUTINE_DAYS2 = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
-function serializeWeeklyShared(shared) {
+function serializeWeeklyShared(shared, defaultTags = []) {
   const lines = [];
   lines.push("# \u9031\u9593\u5171\u6709");
   lines.push("");
@@ -2917,7 +3039,7 @@ function serializeWeeklyShared(shared) {
       lines.push(`- ${month}: ${theme}`);
     }
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 function parseWeeklyShared(content) {
   const routineActions = [];
@@ -2999,7 +3121,8 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
     this.repository = new MarkdownRepository(this.plugin.app);
     this.tasksService = new TasksService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
   getViewType() {
@@ -3043,10 +3166,10 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
     const prevButton = navButtons.createEl("button", { text: "\u25C0 \u524D\u9031" });
     const todayButton = navButtons.createEl("button", { text: "\u4ECA\u65E5" });
     const nextButton = navButtons.createEl("button", { text: "\u6B21\u9031 \u25B6" });
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
     this.weekStart = computeWeekStart2(/* @__PURE__ */ new Date(), this.weekOffset, this.plugin.settings.weekStart);
     this.dayOrder = dayOrder(this.plugin.settings.weekStart);
     const plan = await this.loadPlanForWeek(this.weekStart);
@@ -3250,7 +3373,8 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
     const tasks = await this.tasksService.listTasks();
     const goalsService = new GoalsService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
     const goals = await goalsService.listGoals();
     const minLevelIndex = LEVELS2.indexOf(this.plugin.settings.actionPlanMinLevel);
@@ -3444,7 +3568,7 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
         role,
         goals: []
       }));
-      const serialized = serializeWeeklyPlan(emptyPlan2);
+      const serialized = serializeWeeklyPlan(emptyPlan2, this.plugin.settings.defaultTags);
       this.lastSavedContent = serialized;
       await this.repository.write(path, serialized);
       return emptyPlan2;
@@ -3461,7 +3585,10 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
         roles: [],
         monthThemes: {}
       };
-      await this.repository.write(path, serializeWeeklyShared(emptyShared));
+      await this.repository.write(
+        path,
+        serializeWeeklyShared(emptyShared, this.plugin.settings.defaultTags)
+      );
       return emptyShared;
     }
     return parseWeeklyShared(content);
@@ -3475,7 +3602,10 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
     shared.roles = this.roleSections.map((role) => role.roleInput.value.trim()).filter((value) => value.length > 0);
     shared.monthThemes[getMonthKey(this.weekStart)] = plan.monthTheme ?? "";
     const path = resolveLifePlannerPath("Weekly Shared", this.plugin.settings.storageDir);
-    await this.repository.write(path, serializeWeeklyShared(shared));
+    await this.repository.write(
+      path,
+      serializeWeeklyShared(shared, this.plugin.settings.defaultTags)
+    );
   }
   buildEmptyPlan() {
     const slots = BASE_DAYS.map((day) => ({ day, entries: [] }));
@@ -3527,7 +3657,7 @@ var WeeklyPlanView = class extends import_obsidian9.ItemView {
         slot.dateLabel = dateLabel ? dateLabel.textContent ?? "" : "";
       }
     }
-    const serialized = serializeWeeklyPlan(plan);
+    const serialized = serializeWeeklyPlan(plan, this.plugin.settings.defaultTags);
     if (serialized === this.lastSavedContent) {
       this.setStatus("\u5909\u66F4\u306F\u3042\u308A\u307E\u305B\u3093");
       return;
@@ -3630,7 +3760,8 @@ var DEFAULT_SETTINGS = {
   weekStart: "monday",
   storageDir: "LifePlanner",
   kanbanColumns: ["Backlog", "Todo", "Doing", "Done"],
-  actionPlanMinLevel: "\u6708\u9593"
+  actionPlanMinLevel: "\u6708\u9593",
+  defaultTags: ["lifeplanner"]
 };
 var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
   constructor(app, plugin) {
@@ -3659,6 +3790,15 @@ var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
       input.onChange(async (value) => {
         const columns = value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
         this.plugin.settings.kanbanColumns = columns.length > 0 ? columns : ["Backlog"];
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian10.Setting(containerEl).setName("Default tags").setDesc("Comma-separated tags applied to LifePlanner files. Leave blank for none.").addText((input) => {
+      input.setPlaceholder("lifeplanner");
+      input.setValue(this.plugin.settings.defaultTags.join(", "));
+      input.onChange(async (value) => {
+        const tags = value.split(",").map((tag) => tag.trim()).filter((tag) => tag.length > 0);
+        this.plugin.settings.defaultTags = tags;
         await this.plugin.saveSettings();
       });
     });

@@ -24,8 +24,16 @@ export class IssuesView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     const repo = new MarkdownRepository(this.plugin.app);
-    this.issuesService = new IssuesService(repo, this.plugin.settings.storageDir);
-    this.goalsService = new GoalsService(repo, this.plugin.settings.storageDir);
+    this.issuesService = new IssuesService(
+      repo,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    this.goalsService = new GoalsService(
+      repo,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
   }
 
   getViewType(): string {
@@ -41,7 +49,7 @@ export class IssuesView extends ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "イシュー" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, ISSUES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-issues-status" });

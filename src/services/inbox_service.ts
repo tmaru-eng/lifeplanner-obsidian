@@ -1,14 +1,17 @@
 import { InboxItem, InboxDestination } from "../models/inbox_item";
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath } from "../storage/path_resolver";
 
 export class InboxService {
   private repository: MarkdownRepository;
   private baseDir: string;
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, baseDir: string) {
+  constructor(repository: MarkdownRepository, baseDir: string, defaultTags: string[]) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async listItems(): Promise<InboxItem[]> {
@@ -39,7 +42,7 @@ export class InboxService {
   }
 
   async saveItems(items: InboxItem[]): Promise<void> {
-    const content = serializeInboxItems(items);
+    const content = serializeInboxItems(items, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Inbox", this.baseDir), content);
   }
 }
@@ -63,7 +66,7 @@ function parseInboxItems(content: string): InboxItem[] {
   return items;
 }
 
-function serializeInboxItems(items: InboxItem[]): string {
+function serializeInboxItems(items: InboxItem[], defaultTags: string[] = []): string {
   const lines: string[] = [];
   lines.push("# Inbox");
   lines.push("");
@@ -76,5 +79,5 @@ function serializeInboxItems(items: InboxItem[]): string {
     }
   }
   lines.push("");
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }

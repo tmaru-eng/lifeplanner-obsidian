@@ -55,7 +55,8 @@ export class WeeklyPlanView extends ItemView {
     this.repository = new MarkdownRepository(this.plugin.app);
     this.tasksService = new TasksService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
 
@@ -105,11 +106,11 @@ export class WeeklyPlanView extends ItemView {
     const todayButton = navButtons.createEl("button", { text: "今日" });
     const nextButton = navButtons.createEl("button", { text: "次週 ▶" });
 
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
-
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
+
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
 
     this.weekStart = computeWeekStart(new Date(), this.weekOffset, this.plugin.settings.weekStart);
     this.dayOrder = dayOrder(this.plugin.settings.weekStart);
@@ -324,7 +325,8 @@ export class WeeklyPlanView extends ItemView {
     const tasks = await this.tasksService.listTasks();
     const goalsService = new GoalsService(
       new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
     const goals = await goalsService.listGoals();
     const minLevelIndex = LEVELS.indexOf(this.plugin.settings.actionPlanMinLevel as GoalLevel);
@@ -531,7 +533,7 @@ export class WeeklyPlanView extends ItemView {
         role,
         goals: [],
       }));
-      const serialized = serializeWeeklyPlan(emptyPlan);
+      const serialized = serializeWeeklyPlan(emptyPlan, this.plugin.settings.defaultTags);
       this.lastSavedContent = serialized;
       await this.repository.write(path, serialized);
       return emptyPlan;
@@ -549,7 +551,10 @@ export class WeeklyPlanView extends ItemView {
         roles: [],
         monthThemes: {},
       };
-      await this.repository.write(path, serializeWeeklyShared(emptyShared));
+      await this.repository.write(
+        path,
+        serializeWeeklyShared(emptyShared, this.plugin.settings.defaultTags)
+      );
       return emptyShared;
     }
     return parseWeeklyShared(content);
@@ -566,7 +571,10 @@ export class WeeklyPlanView extends ItemView {
       .filter((value) => value.length > 0);
     shared.monthThemes[getMonthKey(this.weekStart)] = plan.monthTheme ?? "";
     const path = resolveLifePlannerPath("Weekly Shared", this.plugin.settings.storageDir);
-    await this.repository.write(path, serializeWeeklyShared(shared));
+    await this.repository.write(
+      path,
+      serializeWeeklyShared(shared, this.plugin.settings.defaultTags)
+    );
   }
 
   private buildEmptyPlan(): WeeklyPlan {
@@ -635,7 +643,7 @@ export class WeeklyPlanView extends ItemView {
       }
     }
 
-    const serialized = serializeWeeklyPlan(plan);
+    const serialized = serializeWeeklyPlan(plan, this.plugin.settings.defaultTags);
     if (serialized === this.lastSavedContent) {
       this.setStatus("変更はありません");
       return;

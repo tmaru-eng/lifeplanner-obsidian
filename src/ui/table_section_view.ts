@@ -3,11 +3,12 @@ import type LifePlannerPlugin from "../main";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { TableColumn, TableSectionService } from "../services/table_section_service";
 import { renderNavigation } from "./navigation";
+import { LifePlannerViewType } from "./view_types";
 
 export class TableSectionView extends ItemView {
   private plugin: LifePlannerPlugin;
   private titleText: string;
-  private viewType: string;
+  private viewType: LifePlannerViewType;
   private service: TableSectionService;
   private columns: TableColumn[];
   private statusEl: HTMLElement | null = null;
@@ -17,7 +18,7 @@ export class TableSectionView extends ItemView {
   constructor(
     leaf: WorkspaceLeaf,
     plugin: LifePlannerPlugin,
-    viewType: string,
+    viewType: LifePlannerViewType,
     type: string,
     titleText: string,
     columns: TableColumn[]
@@ -32,7 +33,8 @@ export class TableSectionView extends ItemView {
       type as never,
       titleText,
       columns,
-      this.plugin.settings.storageDir
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
     );
   }
 
@@ -49,7 +51,7 @@ export class TableSectionView extends ItemView {
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: this.titleText });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, this.viewType, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });

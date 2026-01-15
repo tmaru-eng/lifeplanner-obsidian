@@ -1,33 +1,36 @@
 import { Issue } from "../models/issue";
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath } from "../storage/path_resolver";
 
 export class IssuesService {
   private repository: MarkdownRepository;
   private baseDir: string;
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, baseDir: string) {
+  constructor(repository: MarkdownRepository, baseDir: string, defaultTags: string[]) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async listIssues(): Promise<Issue[]> {
     const path = resolveLifePlannerPath("Issues", this.baseDir);
     const content = await this.repository.read(path);
     if (!content) {
-      await this.repository.write(path, serializeIssues([]));
+      await this.repository.write(path, serializeIssues([], this.defaultTags));
       return [];
     }
     return parseIssues(content);
   }
 
   async saveIssues(issues: Issue[]): Promise<void> {
-    const content = serializeIssues(issues);
+    const content = serializeIssues(issues, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Issues", this.baseDir), content);
   }
 }
 
-function serializeIssues(issues: Issue[]): string {
+function serializeIssues(issues: Issue[], defaultTags: string[] = []): string {
   const lines: string[] = [];
   lines.push("# Issues");
   lines.push("");
@@ -64,7 +67,7 @@ function serializeIssues(issues: Issue[]): string {
       lines.push("");
     }
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 function parseIssues(content: string): Issue[] {

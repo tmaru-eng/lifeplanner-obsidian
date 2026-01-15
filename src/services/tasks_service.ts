@@ -1,14 +1,17 @@
 import { Task } from "../models/task";
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath } from "../storage/path_resolver";
 
 export class TasksService {
   private repository: MarkdownRepository;
   private baseDir: string;
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, baseDir: string) {
+  constructor(repository: MarkdownRepository, baseDir: string, defaultTags: string[]) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async listTasks(): Promise<Task[]> {
@@ -33,7 +36,7 @@ export class TasksService {
   }
 
   async saveTasks(tasks: Task[]): Promise<void> {
-    const content = serializeTasks(tasks);
+    const content = serializeTasks(tasks, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Tasks", this.baseDir), content);
   }
 }
@@ -67,7 +70,7 @@ function parseTasks(content: string): Task[] {
   return tasks;
 }
 
-function serializeTasks(tasks: Task[]): string {
+function serializeTasks(tasks: Task[], defaultTags: string[] = []): string {
   const lines: string[] = [];
   lines.push("# 目標からタスク切り出し");
   lines.push("");
@@ -84,5 +87,5 @@ function serializeTasks(tasks: Task[]): string {
     }
   }
   lines.push("");
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }

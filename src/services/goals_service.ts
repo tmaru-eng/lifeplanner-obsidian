@@ -1,5 +1,6 @@
 import { Goal, GoalLevel } from "../models/goal";
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath } from "../storage/path_resolver";
 
 const LEVEL_ORDER: GoalLevel[] = [
@@ -15,23 +16,25 @@ const LEVEL_ORDER: GoalLevel[] = [
 export class GoalsService {
   private repository: MarkdownRepository;
   private baseDir: string;
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, baseDir: string) {
+  constructor(repository: MarkdownRepository, baseDir: string, defaultTags: string[]) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async listGoals(): Promise<Goal[]> {
     const path = resolveLifePlannerPath("Goals", this.baseDir);
     const content = await this.repository.read(path);
     if (!content) {
-      await this.repository.write(path, serializeGoals([]));
+      await this.repository.write(path, serializeGoals([], this.defaultTags));
       return [];
     }
     const goals = parseGoals(content);
     const idLines = content.match(/^ID:/gm)?.length ?? 0;
     if (goals.length > 0 && idLines < goals.length) {
-      await this.repository.write(path, serializeGoals(goals));
+      await this.repository.write(path, serializeGoals(goals, this.defaultTags));
     }
     return goals;
   }
@@ -92,7 +95,7 @@ export class GoalsService {
   }
 
   async saveGoals(goals: Goal[]): Promise<void> {
-    const content = serializeGoals(goals);
+    const content = serializeGoals(goals, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Goals", this.baseDir), content);
   }
 }
@@ -206,7 +209,7 @@ function parseGoals(content: string): Goal[] {
   return goals;
 }
 
-function serializeGoals(goals: Goal[]): string {
+function serializeGoals(goals: Goal[], defaultTags: string[] = []): string {
   const lines: string[] = [];
   lines.push("# 目標ゴール");
   lines.push("");
@@ -252,5 +255,5 @@ function serializeGoals(goals: Goal[]): string {
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }

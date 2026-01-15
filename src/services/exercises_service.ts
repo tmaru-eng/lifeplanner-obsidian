@@ -1,13 +1,16 @@
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath } from "../storage/path_resolver";
 
 export class ExercisesService {
   private repository: MarkdownRepository;
   private baseDir: string;
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, baseDir: string) {
+  constructor(repository: MarkdownRepository, baseDir: string, defaultTags: string[]) {
     this.repository = repository;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async loadSections(
@@ -16,7 +19,7 @@ export class ExercisesService {
     const resolved = resolveLifePlannerPath("Exercises", this.baseDir);
     const content = await this.repository.read(resolved);
     if (!content) {
-      const seed = serializeSections(sectionDefs, {});
+      const seed = serializeSections(sectionDefs, {}, this.defaultTags);
       await this.repository.write(resolved, seed);
       return buildSectionMap(sectionDefs, {});
     }
@@ -29,7 +32,7 @@ export class ExercisesService {
     sectionDefs: { title: string; defaultBody: string; questions?: string[] }[],
     sections: Record<string, string>
   ): Promise<void> {
-    const content = serializeSections(sectionDefs, sections);
+    const content = serializeSections(sectionDefs, sections, this.defaultTags);
     await this.repository.write(resolveLifePlannerPath("Exercises", this.baseDir), content);
   }
 }
@@ -64,7 +67,8 @@ function parseSections(content: string): Record<string, string> {
 
 function serializeSections(
   sectionDefs: { title: string; defaultBody: string; questions?: string[] }[],
-  sections: Record<string, string>
+  sections: Record<string, string>,
+  defaultTags: string[] = []
 ): string {
   const lines: string[] = [];
   lines.push("# Exercises");
@@ -80,7 +84,7 @@ function serializeSections(
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 function buildSectionMap(

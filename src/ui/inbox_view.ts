@@ -19,11 +19,16 @@ export class InboxView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     const repository = new MarkdownRepository(this.plugin.app);
-    this.inboxService = new InboxService(repository, this.plugin.settings.storageDir);
+    this.inboxService = new InboxService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
     this.inboxTriage = new InboxTriage(
       repository,
       this.plugin.settings.storageDir,
-      this.plugin.settings.weekStart
+      this.plugin.settings.weekStart,
+      this.plugin.settings.defaultTags
     );
   }
 
@@ -41,7 +46,7 @@ export class InboxView extends ItemView {
 
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     view.createEl("h2", { text: "Inbox" });
-    renderNavigation(view, (viewType) => {
+    renderNavigation(view, INBOX_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
     });
 

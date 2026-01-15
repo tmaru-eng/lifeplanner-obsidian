@@ -1,4 +1,5 @@
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath, LifePlannerType } from "../storage/path_resolver";
 
 export class SimpleSectionService {
@@ -6,12 +7,20 @@ export class SimpleSectionService {
   private type: LifePlannerType;
   private title: string;
   private baseDir: string;
+  private defaultTags: string[];
 
-  constructor(repository: MarkdownRepository, type: LifePlannerType, title: string, baseDir: string) {
+  constructor(
+    repository: MarkdownRepository,
+    type: LifePlannerType,
+    title: string,
+    baseDir: string,
+    defaultTags: string[]
+  ) {
     this.repository = repository;
     this.type = type;
     this.title = title;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async load(): Promise<string> {
@@ -37,7 +46,7 @@ export class SimpleSectionService {
       lines.push("- ");
     }
     lines.push("");
-    return lines.join("\n");
+    return prependTagFrontmatter(lines, this.defaultTags).join("\n");
   }
 
   private parse(content: string): string {

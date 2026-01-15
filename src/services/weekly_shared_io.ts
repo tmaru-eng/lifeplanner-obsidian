@@ -1,9 +1,10 @@
 import { RoutineAction } from "../models/weekly_plan";
 import { WeeklyShared } from "../models/weekly_shared";
+import { prependTagFrontmatter } from "./markdown_tags";
 
 const ROUTINE_DAYS = ["月", "火", "水", "木", "金", "土"];
 
-export function serializeWeeklyShared(shared: WeeklyShared): string {
+export function serializeWeeklyShared(shared: WeeklyShared, defaultTags: string[] = []): string {
   const lines: string[] = [];
   lines.push("# 週間共有");
   lines.push("");
@@ -41,7 +42,7 @@ export function serializeWeeklyShared(shared: WeeklyShared): string {
       lines.push(`- ${month}: ${theme}`);
     }
   }
-  return lines.join("\n");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
 export function parseWeeklyShared(content: string): WeeklyShared {

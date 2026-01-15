@@ -8,6 +8,7 @@ export interface LifePlannerSettings {
   storageDir: string;
   kanbanColumns: string[];
   actionPlanMinLevel: string;
+  defaultTags: string[];
 }
 
 export const DEFAULT_SETTINGS: LifePlannerSettings = {
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: LifePlannerSettings = {
   storageDir: "LifePlanner",
   kanbanColumns: ["Backlog", "Todo", "Doing", "Done"],
   actionPlanMinLevel: "月間",
+  defaultTags: ["lifeplanner"],
 };
 
 export class LifePlannerSettingTab extends PluginSettingTab {
@@ -66,6 +68,22 @@ export class LifePlannerSettingTab extends PluginSettingTab {
             .map((item) => item.trim())
             .filter((item) => item.length > 0);
           this.plugin.settings.kanbanColumns = columns.length > 0 ? columns : ["Backlog"];
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Default tags")
+      .setDesc("Comma-separated tags applied to LifePlanner files. Leave blank for none.")
+      .addText((input) => {
+        input.setPlaceholder("lifeplanner");
+        input.setValue(this.plugin.settings.defaultTags.join(", "));
+        input.onChange(async (value) => {
+          const tags = value
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter((tag) => tag.length > 0);
+          this.plugin.settings.defaultTags = tags;
           await this.plugin.saveSettings();
         });
       });

@@ -1,4 +1,5 @@
 import { MarkdownRepository } from "./markdown_repository";
+import { prependTagFrontmatter } from "./markdown_tags";
 import { resolveLifePlannerPath, LifePlannerType } from "../storage/path_resolver";
 
 export type TableColumnType = "text" | "select" | "checkbox";
@@ -16,19 +17,22 @@ export class TableSectionService {
   private title: string;
   private columns: TableColumn[];
   private baseDir: string;
+  private defaultTags: string[];
 
   constructor(
     repository: MarkdownRepository,
     type: LifePlannerType,
     title: string,
     columns: TableColumn[],
-    baseDir: string
+    baseDir: string,
+    defaultTags: string[]
   ) {
     this.repository = repository;
     this.type = type;
     this.title = title;
     this.columns = columns;
     this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
   }
 
   async loadRows(): Promise<string[][]> {
@@ -62,7 +66,7 @@ export class TableSectionService {
       });
     }
     lines.push("");
-    return lines.join("\n");
+    return prependTagFrontmatter(lines, this.defaultTags).join("\n");
   }
 }
 
