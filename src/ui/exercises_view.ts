@@ -3,6 +3,7 @@ import { ExercisesService } from "../services/exercises_service";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { TableColumn, TableSectionService } from "../services/table_section_service";
 import type LifePlannerPlugin from "../main";
+import { attachDeleteMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { EXERCISES_VIEW_TYPE } from "./view_types";
 export { EXERCISES_VIEW_TYPE };
@@ -14,6 +15,12 @@ type ExerciseSection =
       defaultBody: string;
       questions?: string[];
       layout?: "vertical";
+    }
+  | {
+      kind: "list";
+      title: string;
+      defaultBody: string;
+      legacyQuestions?: string[];
     }
   | {
       kind: "table";
@@ -54,22 +61,22 @@ const EXERCISE_SECTIONS: ExerciseSection[] = [
     layout: "vertical",
   },
   {
+    kind: "list",
     title: "余命1年リスト",
     defaultBody: "",
-    questions: ["「余命1年」だったら何をしたい？"],
-    layout: "vertical",
+    legacyQuestions: ["「余命1年」だったら何をしたい？"],
   },
   {
+    kind: "list",
     title: "あと100年人生リスト",
     defaultBody: "",
-    questions: ["健康体であと100年生きられるとしたら何をしたい？"],
-    layout: "vertical",
+    legacyQuestions: ["健康体であと100年生きられるとしたら何をしたい？"],
   },
   {
+    kind: "list",
     title: "死ぬまでにやりたいこと",
     defaultBody: "",
-    questions: ["何をしたい？"],
-    layout: "vertical",
+    legacyQuestions: ["何をしたい？"],
   },
   {
     title: "立場を変えて考える",
@@ -126,6 +133,7 @@ export class ExercisesView extends ItemView {
   private listEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
   private activeSectionTitle = EXERCISE_SECTIONS[0]?.title ?? "";
+  private disposeMenuClose: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: LifePlannerPlugin) {
     super(leaf);
@@ -150,19 +158,23 @@ export class ExercisesView extends ItemView {
     container.empty();
 
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
     view.createEl("h2", { text: "演習" });
     renderNavigation(view, EXERCISES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
 
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-exercises-list" });
+    this.disposeMenuClose = registerRowMenuClose(view);
     await this.renderExercises();
   }
 
   async onClose(): Promise<void> {
     this.listEl = null;
     this.statusEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
   }
 
   private async renderExercises(): Promise<void> {
@@ -170,22 +182,37 @@ export class ExercisesView extends ItemView {
       return;
     }
     this.listEl.empty();
-    const questionSections = EXERCISE_SECTIONS.filter(
-      (section): section is Extract<ExerciseSection, { kind?: "questions" }> =>
+    const contentSections = EXERCISE_SECTIONS.filter(
+      (section): section is Exclude<ExerciseSection, { kind: "table" }> =>
         section.kind !== "table"
     );
-    const sections = await this.exercisesService.loadSections(questionSections);
+    const contentSectionDefs = contentSections.map((section) => ({
+      title: section.title,
+      defaultBody: section.defaultBody,
+      questions:
+        section.kind === "questions"
+          ? section.questions
+          : section.kind === "list"
+            ? section.legacyQuestions
+            : section.questions,
+    }));
+    const sections = await this.exercisesService.loadSections(contentSectionDefs);
     const tabs = this.listEl.createEl("div", { cls: "lifeplanner-exercises-tabs" });
     const content = this.listEl.createEl("div", { cls: "lifeplanner-exercises-content" });
 
     const renderSection = async (sectionDef: ExerciseSection): Promise<void> => {
       content.empty();
       const section = content.createEl("div", { cls: "lifeplanner-exercises-item" });
-      section.createEl("h3", { text: sectionDef.title });
       if (sectionDef.kind === "table") {
+        section.createEl("h3", { text: sectionDef.title });
         await this.renderTableSection(section, sectionDef);
         return;
       }
+      if (sectionDef.kind === "list") {
+        this.renderListSection(section, sectionDef, sections, contentSectionDefs);
+        return;
+      }
+      section.createEl("h3", { text: sectionDef.title });
       if (sectionDef.questions && sectionDef.questions.length > 0) {
         const savedLines = (sections[sectionDef.title] ?? "")
           .split("\n")
@@ -225,7 +252,7 @@ export class ExercisesView extends ItemView {
               lines.push(`- ${q}: ${value}`);
             });
             sections[sectionDef.title] = lines.join("\n");
-            void this.exercisesService.saveSections(questionSections, sections);
+            void this.exercisesService.saveSections(contentSectionDefs, sections);
             this.setStatus("保存しました");
           });
         });
@@ -236,7 +263,7 @@ export class ExercisesView extends ItemView {
         textarea.placeholder = "回答を記入";
         textarea.addEventListener("input", () => {
           sections[sectionDef.title] = textarea.value;
-          void this.exercisesService.saveSections(questionSections, sections);
+          void this.exercisesService.saveSections(contentSectionDefs, sections);
           this.setStatus("保存しました");
         });
       }
@@ -284,6 +311,7 @@ export class ExercisesView extends ItemView {
     const actions = container.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = actions.createEl("button", { text: "追加" });
     const table = container.createEl("div", { cls: "lifeplanner-table-grid" });
+    table.dataset.sectionType = sectionDef.tableType;
     table.style.gridTemplateColumns = sectionDef.columns
       .map((column) => {
         if (column.width) {
@@ -352,6 +380,114 @@ export class ExercisesView extends ItemView {
       void service.saveRows(rows);
       void this.renderExercises();
     });
+  }
+
+  private renderListSection(
+    container: HTMLElement,
+    sectionDef: Extract<ExerciseSection, { kind: "list" }>,
+    sections: Record<string, string>,
+    sectionDefs: { title: string; defaultBody: string; questions?: string[] }[]
+  ): void {
+    const rawBody = sections[sectionDef.title] ?? "";
+    const parsed = this.parseListItems(rawBody, sectionDef.legacyQuestions ?? []);
+    const items = parsed.items.length > 0 ? [...parsed.items] : [""];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: sectionDef.title });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "追加" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-list-items" });
+
+    const persist = (showStatus: boolean): void => {
+      sections[sectionDef.title] = this.buildListBody(items);
+      void this.exercisesService.saveSections(sectionDefs, sections).then(() => {
+        if (showStatus) {
+          this.setStatus("保存しました");
+        }
+      });
+    };
+
+    const renderRows = (): void => {
+      list.empty();
+      items.forEach((value, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-list-row" });
+        const input = row.createEl("textarea", { cls: "lifeplanner-exercises-list-input" });
+        input.rows = 1;
+        input.value = value;
+        this.autoResizeTextarea(input);
+        input.addEventListener("input", () => {
+          items[index] = input.value;
+          this.autoResizeTextarea(input);
+          persist(true);
+        });
+        const menuScope = this.listEl ?? container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push("");
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+
+    addButton.addEventListener("click", () => {
+      items.push("");
+      renderRows();
+    });
+
+    renderRows();
+    if (parsed.usedLegacy) {
+      persist(false);
+    }
+  }
+
+  private parseListItems(
+    rawBody: string,
+    legacyQuestions: string[]
+  ): { items: string[]; usedLegacy: boolean } {
+    const items: string[] = [];
+    let usedLegacy = false;
+    const lines = rawBody.split("\n");
+    for (const line of lines) {
+      let value = line.trim();
+      if (!value || value === "-") {
+        continue;
+      }
+      if (value.startsWith("- ")) {
+        value = value.slice(2).trim();
+      }
+      if (!value || value === "-") {
+        continue;
+      }
+      const legacyQuestion = legacyQuestions.find((question) => value.startsWith(`${question}:`));
+      if (legacyQuestion) {
+        usedLegacy = true;
+        const extracted = value.slice(legacyQuestion.length + 1).trim();
+        if (extracted) {
+          items.push(extracted);
+        }
+        continue;
+      }
+      if (legacyQuestions.includes(value)) {
+        usedLegacy = true;
+        continue;
+      }
+      items.push(value);
+    }
+    return { items, usedLegacy };
+  }
+
+  private buildListBody(items: string[]): string {
+    const cleaned = items
+      .map((item) => item.replace(/\s*\n\s*/g, " ").trim())
+      .filter((item) => item.length > 0);
+    return cleaned.map((item) => `- ${item}`).join("\n");
+  }
+
+  private autoResizeTextarea(textarea: HTMLTextAreaElement): void {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
   }
 
   private setStatus(message: string): void {

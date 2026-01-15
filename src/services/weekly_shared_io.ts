@@ -1,4 +1,3 @@
-import { RoutineAction } from "../models/weekly_plan";
 import { WeeklyShared } from "../models/weekly_shared";
 import { prependTagFrontmatter } from "./markdown_tags";
 
@@ -16,8 +15,8 @@ export function serializeWeeklyShared(shared: WeeklyShared, defaultTags: string[
     lines.push(`|  | ${ROUTINE_DAYS.map(() => "[ ]").join(" | ")} |`);
   } else {
     for (const action of shared.routineActions) {
-      const checks = ROUTINE_DAYS.map((day) => (action.checks[day] ? "[x]" : "[ ]"));
-      lines.push(`| ${action.title} | ${checks.join(" | ")} |`);
+      const checks = ROUTINE_DAYS.map(() => "[ ]");
+      lines.push(`| ${action} | ${checks.join(" | ")} |`);
     }
   }
   lines.push("");
@@ -46,7 +45,7 @@ export function serializeWeeklyShared(shared: WeeklyShared, defaultTags: string[
 }
 
 export function parseWeeklyShared(content: string): WeeklyShared {
-  const routineActions: RoutineAction[] = [];
+  const routineActions: string[] = [];
   const roles: string[] = [];
   const monthThemes: Record<string, string> = {};
   let section = "";
@@ -63,14 +62,9 @@ export function parseWeeklyShared(content: string): WeeklyShared {
       if (line.startsWith("|")) {
         const cells = line.split("|").map((cell) => cell.trim());
         if (cells.length >= 3 && cells[1] !== "行動" && cells[1] !== "---") {
-          const title = cells[1] || "";
+          const title = (cells[1] || "").trim();
           if (title) {
-            const checks: Record<string, boolean> = {};
-            ROUTINE_DAYS.forEach((day, idx) => {
-              const cell = cells[idx + 2] || "";
-              checks[day] = cell.includes("[x]");
-            });
-            routineActions.push({ title, checks });
+            routineActions.push(title);
           }
         }
       }

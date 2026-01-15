@@ -4,6 +4,7 @@ import { Issue, IssuePriority } from "../models/issue";
 import { GoalsService } from "../services/goals_service";
 import { IssuesService } from "../services/issues_service";
 import { MarkdownRepository } from "../services/markdown_repository";
+import { enableTapToBlur } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { ISSUES_VIEW_TYPE } from "./view_types";
 
@@ -48,10 +49,11 @@ export class IssuesView extends ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
     view.createEl("h2", { text: "イシュー" });
     renderNavigation(view, ISSUES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     this.statusEl = view.createEl("div", { cls: "lifeplanner-issues-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-kanban" });
     this.handleMenuClose = (event: MouseEvent) => {

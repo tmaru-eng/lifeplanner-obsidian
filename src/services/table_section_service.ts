@@ -9,6 +9,7 @@ export type TableColumn = {
   type: TableColumnType;
   options?: string[];
   width?: string;
+  multiline?: boolean;
 };
 
 export class TableSectionService {

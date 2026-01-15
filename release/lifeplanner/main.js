@@ -23,10 +23,10 @@ __export(main_exports, {
   default: () => LifePlannerPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 
-// src/ui/exercises_view.ts
-var import_obsidian2 = require("obsidian");
+// src/ui/dashboard_view.ts
+var import_obsidian3 = require("obsidian");
 
 // src/services/markdown_tags.ts
 function normalizeTags(rawTags) {
@@ -73,9 +73,11 @@ function resolveLifePlannerPath(type, baseDir = "LifePlanner") {
   const filename = `${TEMPLATE_PREFIX} - ${type}.md`;
   return dir ? `${dir}/${filename}` : filename;
 }
-function resolveWeeklyPlanPath(weekStart, baseDir = "LifePlanner") {
+function resolveWeeklyPlanPath(weekStart, baseDir = "LifePlanner", options = {}) {
   const dir = normalizeBaseDir(baseDir);
-  const formatted = formatDate(weekStart);
+  const forceMonday = options.forceMonday !== false;
+  const normalized = forceMonday ? normalizeWeeklyPlanDate(weekStart) : new Date(weekStart);
+  const formatted = formatDate(normalized);
   const filename = `${TEMPLATE_PREFIX} - Weekly - ${formatted}.md`;
   return dir ? `${dir}/${filename}` : filename;
 }
@@ -85,634 +87,20 @@ function formatDate(date) {
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+function normalizeWeeklyPlanDate(date) {
+  const normalized = new Date(date);
+  const day = normalized.getDay();
+  if (day === 0) {
+    normalized.setDate(normalized.getDate() + 1);
+  } else if (day !== 1) {
+    normalized.setDate(normalized.getDate() - (day - 1));
+  }
+  return normalized;
+}
 function normalizeBaseDir(value) {
   const trimmed = value.trim().replace(/^\/+|\/+$/g, "");
   return trimmed;
 }
-
-// src/services/exercises_service.ts
-var ExercisesService = class {
-  constructor(repository, baseDir, defaultTags) {
-    this.repository = repository;
-    this.baseDir = baseDir;
-    this.defaultTags = defaultTags;
-  }
-  async loadSections(sectionDefs) {
-    const resolved = resolveLifePlannerPath("Exercises", this.baseDir);
-    const content = await this.repository.read(resolved);
-    if (!content) {
-      const seed = serializeSections(sectionDefs, {}, this.defaultTags);
-      await this.repository.write(resolved, seed);
-      return buildSectionMap(sectionDefs, {});
-    }
-    const parsed = parseSections(content);
-    const normalized = normalizeSections(sectionDefs, parsed);
-    return buildSectionMap(sectionDefs, normalized);
-  }
-  async saveSections(sectionDefs, sections) {
-    const content = serializeSections(sectionDefs, sections, this.defaultTags);
-    await this.repository.write(resolveLifePlannerPath("Exercises", this.baseDir), content);
-  }
-};
-function parseSections(content) {
-  const sections = {};
-  const lines = content.split("\n");
-  let currentTitle = "";
-  let body = [];
-  const flush = () => {
-    if (!currentTitle) {
-      return;
-    }
-    sections[currentTitle] = body.join("\n").trim();
-  };
-  for (const line of lines) {
-    const headingMatch = line.match(/^##\s+(.+)$/);
-    if (headingMatch) {
-      flush();
-      currentTitle = headingMatch[1].trim();
-      body = [];
-      continue;
-    }
-    if (!currentTitle) {
-      continue;
-    }
-    body.push(line);
-  }
-  flush();
-  return sections;
-}
-function serializeSections(sectionDefs, sections, defaultTags = []) {
-  const lines = [];
-  lines.push("# Exercises");
-  lines.push("");
-  for (const section of sectionDefs) {
-    const body = sections[section.title] ?? section.defaultBody;
-    lines.push(`## ${section.title}`);
-    lines.push("");
-    if (body && body.trim().length > 0) {
-      lines.push(body.trim());
-    } else {
-      lines.push("- ");
-    }
-    lines.push("");
-  }
-  return prependTagFrontmatter(lines, defaultTags).join("\n");
-}
-function buildSectionMap(sectionDefs, parsed) {
-  const result = {};
-  for (const section of sectionDefs) {
-    result[section.title] = parsed[section.title] ?? section.defaultBody;
-  }
-  return result;
-}
-function normalizeSections(sectionDefs, parsed) {
-  const normalized = { ...parsed };
-  for (const section of sectionDefs) {
-    if (!section.questions || section.questions.length === 0) {
-      continue;
-    }
-    const raw = normalized[section.title];
-    if (!raw) {
-      continue;
-    }
-    const lines = raw.split("\n").map((line) => line.trim());
-    const filtered = lines.filter((line) => !section.questions?.includes(line));
-    normalized[section.title] = filtered.join("\n").trim();
-  }
-  return normalized;
-}
-
-// src/storage/markdown_storage.ts
-var import_obsidian = require("obsidian");
-var MarkdownStorage = class {
-  constructor(app) {
-    this.app = app;
-  }
-  async read(path) {
-    if (!isSafePath(path)) {
-      throw new Error(`Unsafe path: ${path}`);
-    }
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!file || !(file instanceof import_obsidian.TFile)) {
-      return "";
-    }
-    return this.app.vault.read(file);
-  }
-  async write(path, content) {
-    if (!isSafePath(path)) {
-      throw new Error(`Unsafe path: ${path}`);
-    }
-    const normalized = content.replace(/\r\n?/g, "\n");
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (file && file instanceof import_obsidian.TFile) {
-      await this.app.vault.modify(file, normalized);
-      return;
-    }
-    await this.ensureFolder(path);
-    await this.app.vault.create(path, normalized);
-  }
-  async ensureFolder(path) {
-    const parts = path.split("/");
-    if (parts.length <= 1) {
-      return;
-    }
-    const folders = parts.slice(0, -1);
-    let current = "";
-    for (const folder of folders) {
-      current = current ? `${current}/${folder}` : folder;
-      const existing = this.app.vault.getAbstractFileByPath(current);
-      if (existing && existing instanceof import_obsidian.TFolder) {
-        continue;
-      }
-      if (!existing) {
-        await this.app.vault.createFolder(current);
-      }
-    }
-  }
-};
-function isSafePath(path) {
-  if (!path) {
-    return false;
-  }
-  if (path.startsWith("/") || path.startsWith("\\")) {
-    return false;
-  }
-  if (path.includes("..")) {
-    return false;
-  }
-  return true;
-}
-
-// src/services/markdown_repository.ts
-var MarkdownRepository = class {
-  constructor(app) {
-    this.storage = new MarkdownStorage(app);
-  }
-  async read(path) {
-    return this.storage.read(path);
-  }
-  async write(path, content) {
-    await this.storage.write(path, content);
-  }
-};
-
-// src/services/table_section_service.ts
-var TableSectionService = class {
-  constructor(repository, type, title, columns, baseDir, defaultTags) {
-    this.repository = repository;
-    this.type = type;
-    this.title = title;
-    this.columns = columns;
-    this.baseDir = baseDir;
-    this.defaultTags = defaultTags;
-  }
-  async loadRows() {
-    const content = await this.repository.read(resolveLifePlannerPath(this.type, this.baseDir));
-    if (!content) {
-      const seed = this.serializeRows([]);
-      await this.repository.write(resolveLifePlannerPath(this.type, this.baseDir), seed);
-      return [];
-    }
-    return parseTable(content);
-  }
-  async saveRows(rows) {
-    const content = this.serializeRows(rows);
-    await this.repository.write(resolveLifePlannerPath(this.type, this.baseDir), content);
-  }
-  serializeRows(rows) {
-    const lines = [];
-    lines.push(`# ${this.title}`);
-    lines.push("");
-    const headers = this.columns.map((col) => col.label);
-    lines.push(`| ${headers.join(" | ")} |`);
-    lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
-    if (rows.length === 0) {
-      lines.push(`| ${headers.map(() => "").join(" | ")} |`);
-    } else {
-      rows.forEach((row) => {
-        const cells = headers.map((_, index) => row[index] ?? "");
-        lines.push(`| ${cells.join(" | ")} |`);
-      });
-    }
-    lines.push("");
-    return prependTagFrontmatter(lines, this.defaultTags).join("\n");
-  }
-};
-function parseTable(content) {
-  const lines = content.split("\n");
-  const tableLines = lines.filter((line) => line.trim().startsWith("|"));
-  if (tableLines.length < 2) {
-    return [];
-  }
-  const dataLines = tableLines.slice(2);
-  const rows = [];
-  for (const line of dataLines) {
-    const cells = line.split("|").map((cell) => cell.trim()).filter((_, index, arr) => index !== 0 && index !== arr.length - 1);
-    if (cells.length === 0) {
-      continue;
-    }
-    rows.push(cells);
-  }
-  return rows;
-}
-
-// src/ui/view_types.ts
-var WEEKLY_PLAN_VIEW_TYPE = "lifeplanner-weekly-plan";
-var INBOX_VIEW_TYPE = "lifeplanner-inbox";
-var GOALS_VIEW_TYPE = "lifeplanner-goals";
-var GOAL_TASK_VIEW_TYPE = "lifeplanner-goal-task";
-var EXERCISES_VIEW_TYPE = "lifeplanner-exercises";
-var ISSUES_VIEW_TYPE = "lifeplanner-issues";
-var MISSION_VIEW_TYPE = "lifeplanner-mission";
-var HAVE_DO_BE_VIEW_TYPE = "lifeplanner-have-do-be";
-var PROMISE_VIEW_TYPE = "lifeplanner-promise";
-var VALUES_VIEW_TYPE = "lifeplanner-values";
-
-// src/ui/navigation.ts
-var NAV_GROUPS = [
-  {
-    id: "operations",
-    label: "\u65E5\u5E38",
-    items: [
-      { label: "\u9031\u9593\u8A08\u753B", viewType: WEEKLY_PLAN_VIEW_TYPE },
-      { label: "Inbox", viewType: INBOX_VIEW_TYPE },
-      { label: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3", viewType: GOAL_TASK_VIEW_TYPE },
-      { label: "\u30A4\u30B7\u30E5\u30FC", viewType: ISSUES_VIEW_TYPE },
-      { label: "\u76EE\u6A19", viewType: GOALS_VIEW_TYPE },
-      { label: "\u7D04\u675F", viewType: PROMISE_VIEW_TYPE }
-    ]
-  },
-  {
-    id: "foundation",
-    label: "\u5185\u7701",
-    items: [
-      { label: "\u30DF\u30C3\u30B7\u30E7\u30F3", viewType: MISSION_VIEW_TYPE },
-      { label: "\u4FA1\u5024\u89B3", viewType: VALUES_VIEW_TYPE },
-      { label: "Have/Do/Be", viewType: HAVE_DO_BE_VIEW_TYPE },
-      { label: "\u6F14\u7FD2", viewType: EXERCISES_VIEW_TYPE }
-    ]
-  }
-];
-var VIEW_GROUP_MAP = /* @__PURE__ */ new Map();
-NAV_GROUPS.forEach((group) => {
-  group.items.forEach((item) => {
-    VIEW_GROUP_MAP.set(item.viewType, group.id);
-  });
-});
-var lastVisitedByGroup = {};
-function resolveGroup(viewType) {
-  const groupId = VIEW_GROUP_MAP.get(viewType);
-  return NAV_GROUPS.find((group) => group.id === groupId) ?? NAV_GROUPS[0];
-}
-function renderNavigation(container, activeViewType, onNavigate) {
-  const nav = container.createEl("div", { cls: "lifeplanner-nav" });
-  const activeGroup = resolveGroup(activeViewType);
-  lastVisitedByGroup[activeGroup.id] = activeViewType;
-  const groupRow = nav.createEl("div", { cls: "lifeplanner-nav-groups" });
-  NAV_GROUPS.forEach((group) => {
-    const button = groupRow.createEl("button", {
-      text: group.label,
-      cls: "lifeplanner-nav-group"
-    });
-    button.setAttr("type", "button");
-    if (group.id === activeGroup.id) {
-      button.classList.add("is-active");
-      button.setAttr("aria-current", "page");
-    }
-    button.addEventListener("click", () => {
-      const target = lastVisitedByGroup[group.id] ?? group.items[0]?.viewType ?? activeViewType;
-      onNavigate(target);
-    });
-  });
-  const tabRow = nav.createEl("div", { cls: "lifeplanner-nav-tabs" });
-  activeGroup.items.forEach((item) => {
-    const button = tabRow.createEl("button", {
-      text: item.label,
-      cls: "lifeplanner-nav-tab"
-    });
-    button.setAttr("type", "button");
-    if (item.viewType === activeViewType) {
-      button.classList.add("is-active");
-      button.setAttr("aria-current", "page");
-    }
-    button.addEventListener("click", () => onNavigate(item.viewType));
-  });
-}
-
-// src/ui/exercises_view.ts
-var EXERCISE_SECTIONS = [
-  {
-    title: "\u4FA1\u5024\u89B3\u5206\u6790",
-    defaultBody: "",
-    questions: [
-      "\u3042\u306A\u305F\u306F\u306A\u305C\u4ECA\u306E\u4F1A\u793E(\u5B66\u6821)\u306B\u5165\u308A\u307E\u3057\u305F\u304B\uFF1F",
-      "\u3042\u306A\u305F\u306F\u306A\u305C\u4ECA\u306E\u8DA3\u5473\u3092\u59CB\u3081\u305F\u306E\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u306F\u306A\u305C\u3053\u306E\u5834\u6240\u306B\u4F4F\u3093\u3067\u308B\u306E\u3067\u3059\u304B\uFF1F",
-      "\u3053\u308C\u307E\u3067\u306B\u4F1A\u3063\u305F\u4EBA\u3067\u3001\u305C\u3072\u3082\u3046\u4E00\u5EA6\u4F1A\u3044\u305F\u3044\u3068\u601D\u3046\u4EBA\u306F\uFF1F",
-      "\u3042\u306A\u305F\u304C\u4E00\u756A\u597D\u304D\u306A\u8A00\u8449\u306F\uFF1F",
-      "\u3042\u306A\u305F\u304C\u3053\u308C\u307E\u3067\u306B\u8AAD\u3093\u3060\u4E00\u756A\u597D\u304D\u306A\u672C\u306F\uFF1F",
-      "\u3053\u308C\u307E\u3067\u306E\u4ED5\u4E8B\u3067\u4E00\u756A\u5145\u5B9F\u3057\u3066\u3044\u305F\u3053\u3068\u306F\uFF1F\u3044\u3064\uFF1F\u3069\u3093\u306A\u4ED5\u4E8B\uFF1F\u306A\u305C\uFF1F",
-      "\u5BB6\u65CF\u3068\u306E\u601D\u3044\u51FA\u3067\u4E00\u756A\u697D\u3057\u304B\u3063\u305F\u3053\u3068\u306F\uFF1F\u3044\u3064\uFF1F\u3069\u3093\u306A\u5185\u5BB9\uFF1F\u306A\u305C\uFF1F",
-      "\u4EBA\u3068\u63A5\u3059\u308B\u4E0A\u3067\u4F55\u304C\u4E00\u756A\u5927\u5207\u3067\u3059\u304B\uFF1F",
-      "\u5931\u3046\u3068\u6C17\u529B\u304C\u306A\u304F\u306A\u308B\u3082\u306E\u306F\u306A\u3093\u3067\u3059\u304B\uFF1F",
-      "\u4ECA\u5F8C\u306E\u4EBA\u751F\u306B\u304A\u3044\u3066\u6700\u3082\u8EAB\u306B\u3064\u3051\u305F\u3044\u624D\u80FD\u3084\u80FD\u529B\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u304C\u3053\u308C\u307E\u3067\u6700\u3082\u308F\u304F\u308F\u304F\u3057\u305F\u3053\u3068\u306F\u3069\u306E\u3088\u3046\u306A\u3053\u3068\u3067\u3057\u305F\u304B\uFF1F",
-      "\u3042\u306A\u305F\u304C\u5FC3\u306E\u305D\u3053\u304B\u3089\u300C\u30EA\u30E9\u30C3\u30AF\u30B9\u300D\u3067\u304D\u308B\u6642\u9593\u306F\u3069\u306E\u3088\u3046\u306A\u6642\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u306E\u7406\u60F3\u3068\u3059\u308B\u4EBA\u306F\u3001\u4F55\u3092\u3082\u3063\u3068\u3082\u5927\u4E8B\u306B\u3057\u3066\u3044\u308B\u306E\u3067\u3057\u3087\u3046\u304B\uFF1F",
-      "\u4EBA\u751F\u306E\u4E2D\u3067\u5B66\u3076\u3053\u3068\u306E\u591A\u304B\u3063\u305F\u5931\u6557\u3001\u632B\u6298\u4F53\u9A13\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u4ED5\u4E8B\u3068\u30D7\u30E9\u30A4\u30D9\u30FC\u30C8\u3067\u5171\u901A\u3057\u3066\u8A00\u3048\u308B\u6307\u91DD\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u306E\u4EBA\u751F\u306E\u4E2D\u3067\u3001\u5145\u5B9F\u611F\u306E\u9AD8\u304B\u3063\u305F\u6210\u529F\u4F53\u9A13\u306F\u306A\u3093\u3067\u3057\u305F\u304B\uFF1F",
-      "\u6BCE\u65E5\u306E\u751F\u6D3B\u3067\u6C17\u3092\u3064\u3051\u3066\u3044\u308B\u3053\u3068\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u79C1\u751F\u6D3B\u3067\u6700\u3082\u4FA1\u5024\u304C\u3042\u308B\u3068\u8003\u3048\u308B\u884C\u52D5\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u4ECA\u3001\u5341\u5206\u306A\u6642\u9593\u304C\u3042\u308C\u3070\u8AB0\u3068\u4F55\u3092\u3057\u305F\u3044\u3067\u3059\u304B\uFF1F",
-      "\u3053\u308C\u304B\u3089\u306E\u4EBA\u751F\u3067\u4E00\u756A\u5B9F\u73FE\u3057\u305F\u3044\u3053\u3068\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u306E\u7406\u60F3\u3068\u3059\u308B\u4EBA\u751F\u306F\u3069\u306E\u3088\u3046\u306A\u3053\u3068\u3092\u3057\u3066\u6210\u3057\u9042\u3052\u305F\u4EBA\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u306E\u4EBA\u751F\u306E\u4E2D\u3067\u5927\u304D\u306A\u5F71\u97FF\u3092\u53D7\u3051\u305F\u4EBA\u306F\u3069\u3093\u306A\u70B9\u304C\u6700\u3082\u512A\u308C\u3066\u3044\u307E\u3057\u305F\u304B\uFF1F"
-    ],
-    layout: "vertical"
-  },
-  {
-    title: "\u4F59\u547D1\u5E74\u30EA\u30B9\u30C8",
-    defaultBody: "",
-    questions: ["\u300C\u4F59\u547D1\u5E74\u300D\u3060\u3063\u305F\u3089\u4F55\u3092\u3057\u305F\u3044\uFF1F"],
-    layout: "vertical"
-  },
-  {
-    title: "\u3042\u3068100\u5E74\u4EBA\u751F\u30EA\u30B9\u30C8",
-    defaultBody: "",
-    questions: ["\u5065\u5EB7\u4F53\u3067\u3042\u3068100\u5E74\u751F\u304D\u3089\u308C\u308B\u3068\u3057\u305F\u3089\u4F55\u3092\u3057\u305F\u3044\uFF1F"],
-    layout: "vertical"
-  },
-  {
-    title: "\u6B7B\u306C\u307E\u3067\u306B\u3084\u308A\u305F\u3044\u3053\u3068",
-    defaultBody: "",
-    questions: ["\u4F55\u3092\u3057\u305F\u3044\uFF1F"],
-    layout: "vertical"
-  },
-  {
-    title: "\u7ACB\u5834\u3092\u5909\u3048\u3066\u8003\u3048\u308B",
-    defaultBody: "",
-    questions: [
-      "\u8AB0\u306E\u7ACB\u5834\u3067\u8003\u3048\u307E\u3059\u304B\uFF1F",
-      "\u305D\u306E\u4EBA\u306F\u3042\u306A\u305F\u306B\u5BFE\u3057\u3066\u4F55\u3092\u671B\u3093\u3067\u307E\u3059\u304B\uFF1F\u4F55\u3092\u3044\u3084\u3060\u3068\u601D\u3063\u3066\u307E\u3059\u304B\uFF1F",
-      "\u671B\u307E\u308C\u3066\u3044\u308B\u3053\u3068\u3092\u5B9F\u73FE\u3059\u308B\u306B\u306F\u3069\u3046\u3057\u305F\u3089\u826F\u3044\u3067\u3059\u304B\uFF1F"
-    ],
-    layout: "vertical"
-  },
-  {
-    title: "\u61A7\u308C\u306E\u4EBA\u7269",
-    defaultBody: "",
-    questions: ["\u8AB0\u306E\uFF1F\u3069\u3093\u306A\u3068\u3053\u308D\uFF1F"],
-    layout: "vertical"
-  },
-  {
-    title: "20\u5E74\u5F8C\u306E\u81EA\u5206\u3078\u30A4\u30F3\u30BF\u30D3\u30E5\u30FC",
-    defaultBody: "",
-    questions: [
-      "\u8AB0\u3068\u4E00\u7DD2\u3067\u3057\u305F\u304B\uFF1F",
-      "\u3069\u306E\u3088\u3046\u306A\u8ECA\u306B\u4E57\u308A\u3001\u3069\u3093\u306A\u8EAB\u306A\u308A\u3067\u3057\u305F\u304B\uFF1F",
-      "\u4ECA\u73FE\u5728\u3069\u3093\u306A\u4ED5\u4E8B\u3092\u3057\u3066\u3044\u308B\u3088\u3046\u3067\u3057\u305F\u304B\uFF1F",
-      "\u3069\u3093\u306A\u6240\u306B\u4F4F\u3093\u3067\u3044\u305D\u3046\u3067\u3057\u305F\u304B\uFF1F",
-      "\u3042\u306A\u305F\u304C\u4ECA\u4E00\u756A\u5927\u5207\u306A\u3082\u306E\u306F\u4F55\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u304C\u305D\u306E\u3088\u3046\u306A\u6210\u529F\u3092\u53CE\u3081\u305F\u306E\u306F\u3069\u3046\u3057\u3066\u3067\u3057\u3087\u3046\u304B\uFF1F",
-      "\u305D\u306E\u3088\u3046\u306B\u904B\u306B\u3082\u6075\u307E\u308C\u308B\u306B\u306F\u3001\u3042\u306A\u305F\u304C\u4F55\u3092\u3057\u3066\u304D\u305F\u304B\u3089\u3067\u3059\u304B\uFF1F",
-      "\u4ECA\u601D\u3048\u3070\u4F55\u304C\u8EE2\u6A5F\u3067\u3057\u305F\u304B\uFF1F\u305D\u3053\u3067\u3069\u3093\u306A\u5224\u65AD\u3092\u3057\u305F\u306E\u3067\u3059\u304B\uFF1F",
-      "\u4ECA\u3001\u4F55\u3092\u3057\u3066\u3044\u308B\u3068\u304D\u304C\u4E00\u756A\u697D\u3057\u3044\u3067\u3059\u304B\uFF1F",
-      "\u3042\u306A\u305F\u3092\u4E00\u756A\u652F\u3048\u3066\u304F\u308C\u305F\u4EBA\u306F\u8AB0\u3067\u3057\u305F\u304B\uFF1F"
-    ],
-    layout: "vertical"
-  },
-  {
-    kind: "table",
-    title: "\u5FC3\u306B\u6B8B\u3063\u305F\u8A00\u8449\u30FB\u5EA7\u53F3\u306E\u9298",
-    tableType: "Quotes",
-    columns: [
-      {
-        label: "\u7A2E\u5225",
-        type: "select",
-        options: ["\u5FC3\u306B\u6B8B\u3063\u305F\u8A00\u8449", "\u5EA7\u53F3\u306E\u9298"],
-        width: "160px"
-      },
-      { label: "\u5185\u5BB9", type: "text", width: "minmax(260px, 1fr)" }
-    ]
-  }
-];
-var ExercisesView = class extends import_obsidian2.ItemView {
-  constructor(leaf, plugin) {
-    super(leaf);
-    this.listEl = null;
-    this.statusEl = null;
-    this.activeSectionTitle = EXERCISE_SECTIONS[0]?.title ?? "";
-    this.plugin = plugin;
-    this.exercisesService = new ExercisesService(
-      new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir,
-      this.plugin.settings.defaultTags
-    );
-  }
-  getViewType() {
-    return EXERCISES_VIEW_TYPE;
-  }
-  getDisplayText() {
-    return "\u6F14\u7FD2";
-  }
-  async onOpen() {
-    const container = this.contentEl;
-    container.empty();
-    const view = container.createEl("div", { cls: "lifeplanner-view" });
-    view.createEl("h2", { text: "\u6F14\u7FD2" });
-    renderNavigation(view, EXERCISES_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
-    this.listEl = view.createEl("div", { cls: "lifeplanner-exercises-list" });
-    await this.renderExercises();
-  }
-  async onClose() {
-    this.listEl = null;
-    this.statusEl = null;
-  }
-  async renderExercises() {
-    if (!this.listEl) {
-      return;
-    }
-    this.listEl.empty();
-    const questionSections = EXERCISE_SECTIONS.filter(
-      (section) => section.kind !== "table"
-    );
-    const sections = await this.exercisesService.loadSections(questionSections);
-    const tabs = this.listEl.createEl("div", { cls: "lifeplanner-exercises-tabs" });
-    const content = this.listEl.createEl("div", { cls: "lifeplanner-exercises-content" });
-    const renderSection = async (sectionDef) => {
-      content.empty();
-      const section = content.createEl("div", { cls: "lifeplanner-exercises-item" });
-      section.createEl("h3", { text: sectionDef.title });
-      if (sectionDef.kind === "table") {
-        await this.renderTableSection(section, sectionDef);
-        return;
-      }
-      if (sectionDef.questions && sectionDef.questions.length > 0) {
-        const savedLines = (sections[sectionDef.title] ?? "").split("\n").map((line) => line.trim());
-        const answerMap = /* @__PURE__ */ new Map();
-        savedLines.forEach((line) => {
-          if (!line.startsWith("- ")) {
-            return;
-          }
-          const content2 = line.replace(/^\-\s*/, "");
-          const parts = content2.split(":");
-          if (parts.length < 2) {
-            return;
-          }
-          const key = parts[0].trim();
-          const value = parts.slice(1).join(":").trim();
-          if (key) {
-            answerMap.set(key, value);
-          }
-        });
-        const grid = section.createEl("div", {
-          cls: sectionDef.layout === "vertical" ? "lifeplanner-exercises-grid is-vertical" : "lifeplanner-exercises-grid"
-        });
-        sectionDef.questions.forEach((question) => {
-          grid.createEl("div", { cls: "lifeplanner-exercises-question", text: question });
-          const input = grid.createEl("textarea", { cls: "lifeplanner-exercises-answer" });
-          input.rows = 3;
-          input.value = answerMap.get(question) ?? "";
-          input.addEventListener("input", () => {
-            answerMap.set(question, input.value.trim());
-            const lines = [];
-            sectionDef.questions?.forEach((q) => {
-              const value = answerMap.get(q) ?? "";
-              lines.push(`- ${q}: ${value}`);
-            });
-            sections[sectionDef.title] = lines.join("\n");
-            void this.exercisesService.saveSections(questionSections, sections);
-            this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
-          });
-        });
-      } else {
-        const textarea = section.createEl("textarea");
-        textarea.rows = 6;
-        textarea.value = sections[sectionDef.title] ?? "";
-        textarea.placeholder = "\u56DE\u7B54\u3092\u8A18\u5165";
-        textarea.addEventListener("input", () => {
-          sections[sectionDef.title] = textarea.value;
-          void this.exercisesService.saveSections(questionSections, sections);
-          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
-        });
-      }
-    };
-    EXERCISE_SECTIONS.forEach((sectionDef) => {
-      const tab = tabs.createEl("button", {
-        text: sectionDef.title,
-        cls: sectionDef.title === this.activeSectionTitle ? "lifeplanner-exercises-tab is-active" : "lifeplanner-exercises-tab"
-      });
-      tab.setAttr("type", "button");
-      tab.addEventListener("click", () => {
-        this.activeSectionTitle = sectionDef.title;
-        tabs.querySelectorAll(".lifeplanner-exercises-tab").forEach((btn) => {
-          btn.classList.remove("is-active");
-        });
-        tab.classList.add("is-active");
-        void renderSection(sectionDef);
-      });
-    });
-    const initial = EXERCISE_SECTIONS.find((sectionDef) => sectionDef.title === this.activeSectionTitle) ?? EXERCISE_SECTIONS[0];
-    if (initial) {
-      await renderSection(initial);
-    }
-  }
-  async renderTableSection(container, sectionDef) {
-    const service = new TableSectionService(
-      new MarkdownRepository(this.plugin.app),
-      sectionDef.tableType,
-      sectionDef.title,
-      sectionDef.columns,
-      this.plugin.settings.storageDir,
-      this.plugin.settings.defaultTags
-    );
-    const actions = container.createEl("div", { cls: "lifeplanner-table-actions" });
-    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
-    const table = container.createEl("div", { cls: "lifeplanner-table-grid" });
-    table.style.gridTemplateColumns = sectionDef.columns.map((column) => {
-      if (column.width) {
-        return column.width;
-      }
-      if (column.type === "checkbox") {
-        return "60px";
-      }
-      if (column.type === "select") {
-        return "120px";
-      }
-      return "minmax(160px, 1fr)";
-    }).join(" ");
-    const rows = await service.loadRows();
-    if (rows.length === 0) {
-      rows.push([]);
-    }
-    sectionDef.columns.forEach((column) => {
-      table.createEl("div", {
-        cls: "lifeplanner-table-cell lifeplanner-table-header",
-        text: column.label
-      });
-    });
-    const setCell = (rowIndex, colIndex, value) => {
-      const row = rows[rowIndex] ?? [];
-      row[colIndex] = value;
-      rows[rowIndex] = row;
-      void service.saveRows(rows);
-      this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
-    };
-    rows.forEach((row, rowIndex) => {
-      sectionDef.columns.forEach((column, colIndex) => {
-        const cell = table.createEl("div", { cls: "lifeplanner-table-cell" });
-        const value = row[colIndex] ?? "";
-        if (column.type === "select") {
-          const select = cell.createEl("select");
-          (column.options ?? []).forEach((option) => {
-            select.createEl("option", { text: option, value: option });
-          });
-          if (!value && column.options && column.options.length > 0) {
-            select.value = column.options[0];
-          } else {
-            select.value = value;
-          }
-          select.addEventListener("change", () => {
-            setCell(rowIndex, colIndex, select.value);
-          });
-        } else if (column.type === "checkbox") {
-          const checkbox = cell.createEl("input", { type: "checkbox" });
-          checkbox.checked = value === "x";
-          checkbox.addEventListener("change", () => {
-            setCell(rowIndex, colIndex, checkbox.checked ? "x" : "");
-          });
-        } else {
-          const input = cell.createEl("input", { type: "text" });
-          input.value = value;
-          input.addEventListener("input", () => {
-            setCell(rowIndex, colIndex, input.value);
-          });
-        }
-      });
-    });
-    addButton.addEventListener("click", () => {
-      rows.push([]);
-      void service.saveRows(rows);
-      void this.renderExercises();
-    });
-  }
-  setStatus(message) {
-    if (!this.statusEl) {
-      return;
-    }
-    this.statusEl.setText(message);
-    window.setTimeout(() => {
-      this.statusEl?.setText("");
-    }, 2e3);
-  }
-};
-
-// src/ui/goal_task_view.ts
-var import_obsidian3 = require("obsidian");
 
 // src/services/goals_service.ts
 var LEVEL_ORDER = [
@@ -945,6 +333,268 @@ function serializeGoals(goals, defaultTags = []) {
   return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
+// src/services/inbox_service.ts
+var InboxService = class {
+  constructor(repository, baseDir, defaultTags) {
+    this.repository = repository;
+    this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
+  }
+  async listItems() {
+    const content = await this.repository.read(resolveLifePlannerPath("Inbox", this.baseDir));
+    if (!content) {
+      return [];
+    }
+    const items = parseInboxItems(content);
+    const activeItems = items.filter((item) => item.destination === "none");
+    if (activeItems.length !== items.length) {
+      await this.saveItems(activeItems);
+    }
+    return activeItems;
+  }
+  async addItem(content, createdAt = Date.now()) {
+    const items = await this.listItems();
+    const item = {
+      id: `inbox-${Date.now()}`,
+      content,
+      createdAt,
+      destination: "none",
+      status: "new"
+    };
+    items.push(item);
+    await this.saveItems(items);
+    return item;
+  }
+  async markTriaged(itemId, destination) {
+    const items = await this.listItems();
+    const index = items.findIndex((item) => item.id === itemId);
+    if (index === -1) {
+      return;
+    }
+    items[index] = {
+      ...items[index],
+      destination,
+      status: destination === "none" ? "new" : "triaged",
+      createdAt: items[index].createdAt ?? Date.now()
+    };
+    await this.saveItems(items);
+  }
+  async updateItem(itemId, content) {
+    const items = await this.listItems();
+    const index = items.findIndex((item) => item.id === itemId);
+    if (index === -1) {
+      return;
+    }
+    items[index] = {
+      ...items[index],
+      content,
+      createdAt: items[index].createdAt ?? Date.now()
+    };
+    await this.saveItems(items);
+  }
+  async deleteItem(itemId) {
+    const items = await this.listItems();
+    const remaining = items.filter((item) => item.id !== itemId);
+    await this.saveItems(remaining);
+  }
+  async saveItems(items) {
+    const content = serializeInboxItems(items, this.defaultTags);
+    await this.repository.write(resolveLifePlannerPath("Inbox", this.baseDir), content);
+  }
+};
+function parseInboxItems(content) {
+  const items = [];
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const match = line.match(/^- \[.\] (.+)$/);
+    if (!match) {
+      continue;
+    }
+    const parsed = extractMetadata(match[1]);
+    const destination = parsed.dest || "none";
+    const createdAt = parseTimestamp(parsed.ts);
+    items.push({
+      id: `inbox-${items.length}`,
+      content: parsed.content,
+      createdAt,
+      destination,
+      status: destination === "none" ? "new" : "triaged"
+    });
+  }
+  return items;
+}
+function serializeInboxItems(items, defaultTags = []) {
+  const lines = [];
+  lines.push("# Inbox");
+  lines.push("");
+  if (items.length === 0) {
+    lines.push("- [ ] ");
+  } else {
+    for (const item of items) {
+      const tokens = [];
+      if (typeof item.createdAt === "number") {
+        tokens.push(`ts:${item.createdAt}`);
+      }
+      if (item.destination !== "none") {
+        tokens.push(`dest:${item.destination}`);
+      }
+      const suffix = tokens.length > 0 ? ` ${tokens.map((token) => `[${token}]`).join(" ")}` : "";
+      lines.push(`- [ ] ${item.content}${suffix}`);
+    }
+  }
+  lines.push("");
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
+}
+function extractMetadata(raw) {
+  let content = raw.trim();
+  const meta = {};
+  const metaPattern = /\s\[(ts|dest):([^\]]+)\]\s*$/;
+  while (true) {
+    const match = content.match(metaPattern);
+    if (!match) {
+      break;
+    }
+    meta[match[1]] = match[2];
+    content = content.slice(0, match.index).trim();
+  }
+  return { content, ts: meta.ts, dest: meta.dest };
+}
+function parseTimestamp(raw) {
+  if (!raw) {
+    return void 0;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : void 0;
+}
+
+// src/services/issues_service.ts
+var IssuesService = class {
+  constructor(repository, baseDir, defaultTags) {
+    this.repository = repository;
+    this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
+  }
+  async listIssues() {
+    const path = resolveLifePlannerPath("Issues", this.baseDir);
+    const content = await this.repository.read(path);
+    if (!content) {
+      await this.repository.write(path, serializeIssues([], this.defaultTags));
+      return [];
+    }
+    return parseIssues(content);
+  }
+  async saveIssues(issues) {
+    const content = serializeIssues(issues, this.defaultTags);
+    await this.repository.write(resolveLifePlannerPath("Issues", this.baseDir), content);
+  }
+};
+function serializeIssues(issues, defaultTags = []) {
+  const lines = [];
+  lines.push("# Issues");
+  lines.push("");
+  const grouped = /* @__PURE__ */ new Map();
+  for (const issue of issues) {
+    const list = grouped.get(issue.status) ?? [];
+    list.push(issue);
+    grouped.set(issue.status, list);
+  }
+  for (const [status, items] of grouped) {
+    lines.push(`## ${status}`);
+    lines.push("");
+    for (const issue of items) {
+      lines.push(`### ${issue.title}`);
+      lines.push(`ID: ${issue.id}`);
+      if (issue.linkedGoalId) {
+        lines.push(`Goal: ${issue.linkedGoalId}`);
+      }
+      if (issue.tags && issue.tags.length > 0) {
+        lines.push(`Tags: ${issue.tags.join(", ")}`);
+      }
+      if (issue.dueDate) {
+        lines.push(`Due: ${issue.dueDate}`);
+      }
+      if (issue.priority) {
+        lines.push(`Priority: ${issue.priority}`);
+      }
+      lines.push("");
+      if (issue.body) {
+        lines.push(issue.body);
+      } else {
+        lines.push("- ");
+      }
+      lines.push("");
+    }
+  }
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
+}
+function parseIssues(content) {
+  const issues = [];
+  const lines = content.split("\n");
+  let currentStatus = "";
+  let current = null;
+  let bodyLines = [];
+  const flush = () => {
+    if (!current) {
+      return;
+    }
+    current.body = bodyLines.join("\n").trim();
+    issues.push(current);
+    current = null;
+    bodyLines = [];
+  };
+  for (const line of lines) {
+    const statusMatch = line.match(/^##\s+(.+)$/);
+    if (statusMatch) {
+      flush();
+      currentStatus = statusMatch[1].trim();
+      continue;
+    }
+    const issueMatch = line.match(/^###\s+(.+)$/);
+    if (issueMatch) {
+      flush();
+      const title = issueMatch[1].trim();
+      current = {
+        id: `issue-${Date.now()}`,
+        title,
+        status: currentStatus || "Backlog",
+        body: ""
+      };
+      continue;
+    }
+    if (!current) {
+      continue;
+    }
+    if (line.startsWith("ID:")) {
+      const id = line.replace("ID:", "").trim();
+      current.id = id || current.id;
+      continue;
+    }
+    if (line.startsWith("Goal:")) {
+      const goal = line.replace("Goal:", "").trim();
+      current.linkedGoalId = goal || void 0;
+      continue;
+    }
+    if (line.startsWith("Tags:")) {
+      const raw = line.replace("Tags:", "").trim();
+      current.tags = raw ? raw.split(",").map((tag) => tag.trim()).filter(Boolean) : void 0;
+      continue;
+    }
+    if (line.startsWith("Due:")) {
+      const due = line.replace("Due:", "").trim();
+      current.dueDate = due || void 0;
+      continue;
+    }
+    if (line.startsWith("Priority:")) {
+      const priority = line.replace("Priority:", "").trim();
+      current.priority = priority || void 0;
+      continue;
+    }
+    bodyLines.push(line);
+  }
+  flush();
+  return issues;
+}
+
 // src/services/tasks_service.ts
 var TasksService = class {
   constructor(repository, baseDir, defaultTags) {
@@ -1024,12 +674,2734 @@ function serializeTasks(tasks, defaultTags = []) {
   return prependTagFrontmatter(lines, defaultTags).join("\n");
 }
 
-// src/ui/goal_task_view.ts
-var GoalTaskView = class extends import_obsidian3.ItemView {
+// src/services/weekly_plan_io.ts
+var DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
+var ROUTINE_DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
+function serializeWeeklyPlan(plan, defaultTags = []) {
+  const lines = [];
+  lines.push("# \u9031\u9593\u8A08\u753B");
+  lines.push("");
+  lines.push(`\u9031\u8868\u793A: ${plan.weekLabel ?? ""}`);
+  lines.push("");
+  lines.push("## \u4ECA\u6708\u306E\u30C6\u30FC\u30DE");
+  lines.push("");
+  lines.push(plan.monthTheme ? `- ${plan.monthTheme}` : "- ");
+  lines.push("");
+  lines.push("## \u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5");
+  lines.push("");
+  lines.push(`| \u884C\u52D5 | ${ROUTINE_DAYS.join(" | ")} |`);
+  lines.push(`| --- | ${ROUTINE_DAYS.map(() => "---").join(" | ")} |`);
+  if (plan.routineActions.length === 0) {
+    lines.push(`|  | ${ROUTINE_DAYS.map(() => "[ ]").join(" | ")} |`);
+  } else {
+    for (const action of plan.routineActions) {
+      const checks = ROUTINE_DAYS.map((day) => action.checks[day] ? "[x]" : "[ ]");
+      lines.push(`| ${action.title} | ${checks.join(" | ")} |`);
+    }
+  }
+  lines.push("");
+  lines.push("## \u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF");
+  lines.push("");
+  if (plan.roles.length === 0) {
+    lines.push("### \u5F79\u52721");
+    lines.push("- ");
+    lines.push("");
+  } else {
+    for (const role of plan.roles) {
+      lines.push(`### ${role.role}`);
+      if (role.goals.length === 0) {
+        lines.push("- ");
+      } else {
+        for (const goal of role.goals) {
+          lines.push(`- ${goal}`);
+        }
+      }
+      lines.push("");
+    }
+  }
+  lines.push("## \u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3");
+  lines.push("");
+  if (plan.actionPlans.length === 0) {
+    lines.push("- [ ] ");
+  } else {
+    for (const item of plan.actionPlans) {
+      const checked = item.done ? "[x]" : "[ ]";
+      lines.push(`- ${checked} ${item.title}`);
+    }
+  }
+  lines.push("## \u4ECA\u9031\u306E\u632F\u308A\u8FD4\u308A");
+  lines.push("");
+  lines.push("### \u826F\u304B\u3063\u305F\u3053\u3068");
+  if (plan.reflectionGood.length === 0) {
+    lines.push("- ");
+  } else {
+    for (const item of plan.reflectionGood) {
+      lines.push(`- ${item}`);
+    }
+  }
+  lines.push("");
+  lines.push("### \u8AB2\u984C");
+  if (plan.reflectionIssues.length === 0) {
+    lines.push("- ");
+  } else {
+    for (const item of plan.reflectionIssues) {
+      lines.push(`- ${item}`);
+    }
+  }
+  lines.push("");
+  lines.push("## \u65E5\u4ED8\u3054\u3068\u306E\u4E00\u8A00\u30E1\u30E2\u6B04");
+  lines.push("");
+  for (const day of DAYS) {
+    lines.push(`### ${day}`);
+    const memos = plan.dailyMemos[day] ?? [];
+    if (memos.length === 0) {
+      lines.push("- ");
+    } else {
+      for (const memo of memos) {
+        lines.push(`- ${memo}`);
+      }
+    }
+    lines.push("");
+  }
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
+}
+function parseWeeklyPlan(content) {
+  const slots = DAYS.map((day) => ({ day, entries: [] }));
+  const dailyMemos = {
+    \u6708: [],
+    \u706B: [],
+    \u6C34: [],
+    \u6728: [],
+    \u91D1: [],
+    \u571F: [],
+    \u65E5: []
+  };
+  const routineActions = [];
+  const roles = [];
+  const reflectionGood = [];
+  const reflectionIssues = [];
+  const actionPlans = [];
+  let monthTheme = "";
+  let weekLabel = "";
+  let section = "";
+  let currentDay = null;
+  let currentRole = null;
+  const lines = content.split("\n");
+  for (const line of lines) {
+    if (line.startsWith("## ")) {
+      section = line.replace(/^##\s+/, "");
+      currentDay = null;
+      currentRole = null;
+      continue;
+    }
+    if (line.startsWith("\u9031\u8868\u793A:")) {
+      weekLabel = line.replace("\u9031\u8868\u793A:", "").trim();
+      continue;
+    }
+    if (section === "\u4ECA\u6708\u306E\u30C6\u30FC\u30DE") {
+      const match = line.match(/^\-\s*(.+)$/);
+      if (match && match[1].trim()) {
+        monthTheme = match[1].trim();
+      }
+      continue;
+    }
+    if (section === "\u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5") {
+      if (line.startsWith("|")) {
+        const cells = line.split("|").map((cell) => cell.trim());
+        if (cells.length >= 3 && cells[1] !== "\u884C\u52D5" && cells[1] !== "---") {
+          const title = cells[1] || "";
+          if (title) {
+            const checks = {};
+            ROUTINE_DAYS.forEach((day, idx) => {
+              const cell = cells[idx + 2] || "";
+              checks[day] = cell.includes("[x]");
+            });
+            routineActions.push({ title, checks });
+          }
+        }
+      }
+      continue;
+    }
+    if (section === "\u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF") {
+      const roleMatch = line.match(/^###\s+(.+)$/);
+      if (roleMatch) {
+        currentRole = { role: roleMatch[1].trim(), goals: [] };
+        roles.push(currentRole);
+        continue;
+      }
+      const goalMatch = line.match(/^\-\s*(.+)$/);
+      if (goalMatch && currentRole && goalMatch[1].trim()) {
+        currentRole.goals.push(goalMatch[1].trim());
+      }
+      continue;
+    }
+    if (section === "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3") {
+      const itemMatch = line.match(/^\-\s*\[( |x)\]\s*(.+)$/);
+      if (itemMatch && itemMatch[2].trim()) {
+        actionPlans.push({ title: itemMatch[2].trim(), done: itemMatch[1] === "x" });
+      }
+      continue;
+    }
+    if (section === "\u4ECA\u9031\u306E\u632F\u308A\u8FD4\u308A") {
+      if (line.startsWith("### \u826F\u304B\u3063\u305F\u3053\u3068")) {
+        currentDay = "good";
+        continue;
+      }
+      if (line.startsWith("### \u8AB2\u984C")) {
+        currentDay = "issue";
+        continue;
+      }
+      const entryMatch = line.match(/^\-\s*(.+)$/);
+      if (entryMatch && entryMatch[1].trim()) {
+        if (currentDay === "good") {
+          reflectionGood.push(entryMatch[1].trim());
+        } else if (currentDay === "issue") {
+          reflectionIssues.push(entryMatch[1].trim());
+        }
+      }
+      continue;
+    }
+    if (section === "\u65E5\u4ED8\u3054\u3068\u306E\u4E00\u8A00\u30E1\u30E2\u6B04") {
+      const dayMatch = line.match(/^###\s+([月火水木金土日])$/);
+      if (dayMatch) {
+        currentDay = dayMatch[1];
+        continue;
+      }
+      const entryMatch = line.match(/^\-\s*(.+)$/);
+      if (entryMatch && currentDay && entryMatch[1].trim()) {
+        dailyMemos[currentDay].push(entryMatch[1].trim());
+      }
+    }
+  }
+  return {
+    id: "weekly",
+    weekStart: "",
+    weekEnd: "",
+    weeklyGoals: [],
+    weekLabel,
+    monthTheme,
+    routineActions,
+    roles,
+    actionPlans,
+    reflectionGood,
+    reflectionIssues,
+    dailyMemos,
+    slots
+  };
+}
+
+// src/services/inbox_triage.ts
+var InboxTriage = class {
+  constructor(repository, baseDir, weekStart, defaultTags) {
+    this.repository = repository;
+    this.baseDir = baseDir;
+    this.weekStart = weekStart;
+    this.defaultTags = defaultTags;
+    this.goalsService = new GoalsService(repository, baseDir, defaultTags);
+    this.tasksService = new TasksService(repository, baseDir, defaultTags);
+    this.issuesService = new IssuesService(repository, baseDir, defaultTags);
+  }
+  async toGoal(item, level) {
+    await this.goalsService.addGoal(level, item.content);
+  }
+  async toTask(item, goalTitle) {
+    await this.tasksService.addTask(goalTitle, item.content);
+  }
+  async toWeekly(item) {
+    const weekStart = computeWeekStart(/* @__PURE__ */ new Date(), 0, this.weekStart);
+    const path = resolveWeeklyPlanPath(weekStart, this.baseDir);
+    const content = await this.repository.read(path);
+    const plan = content ? parseWeeklyPlan(content) : emptyPlan();
+    plan.actionPlans.push({ title: item.content, done: false });
+    await this.repository.write(path, serializeWeeklyPlan(plan, this.defaultTags));
+  }
+  async toIssue(item) {
+    const issues = await this.issuesService.listIssues();
+    issues.push({
+      id: `issue-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
+      title: item.content,
+      status: "Backlog",
+      body: ""
+    });
+    await this.issuesService.saveIssues(issues);
+  }
+};
+function emptyPlan() {
+  return {
+    id: "weekly",
+    weekStart: "",
+    weekEnd: "",
+    slots: [
+      { day: "\u6708", entries: [] },
+      { day: "\u706B", entries: [] },
+      { day: "\u6C34", entries: [] },
+      { day: "\u6728", entries: [] },
+      { day: "\u91D1", entries: [] },
+      { day: "\u571F", entries: [] },
+      { day: "\u65E5", entries: [] }
+    ],
+    weeklyGoals: [],
+    weekLabel: "",
+    monthTheme: "",
+    routineActions: [],
+    roles: [],
+    actionPlans: [],
+    reflectionGood: [],
+    reflectionIssues: [],
+    dailyMemos: { \u6708: [], \u706B: [], \u6C34: [], \u6728: [], \u91D1: [], \u571F: [], \u65E5: [] },
+    reviewNotes: ""
+  };
+}
+function computeWeekStart(today, offset, weekStart) {
+  const base = new Date(today);
+  base.setDate(base.getDate() + offset * 7);
+  const day = base.getDay();
+  const startIndex = weekStart === "sunday" ? 0 : 1;
+  const diff = (day - startIndex + 7) % 7;
+  const start = new Date(base);
+  start.setDate(base.getDate() - diff);
+  return start;
+}
+
+// src/storage/markdown_storage.ts
+var import_obsidian = require("obsidian");
+var MarkdownStorage = class {
+  constructor(app) {
+    this.app = app;
+  }
+  async read(path) {
+    if (!isSafePath(path)) {
+      throw new Error(`Unsafe path: ${path}`);
+    }
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || !(file instanceof import_obsidian.TFile)) {
+      return "";
+    }
+    return this.app.vault.read(file);
+  }
+  async write(path, content) {
+    if (!isSafePath(path)) {
+      throw new Error(`Unsafe path: ${path}`);
+    }
+    const normalized = content.replace(/\r\n?/g, "\n");
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file && file instanceof import_obsidian.TFile) {
+      await this.app.vault.modify(file, normalized);
+      return;
+    }
+    await this.ensureFolder(path);
+    await this.app.vault.create(path, normalized);
+  }
+  async ensureFolder(path) {
+    const parts = path.split("/");
+    if (parts.length <= 1) {
+      return;
+    }
+    const folders = parts.slice(0, -1);
+    let current = "";
+    for (const folder of folders) {
+      current = current ? `${current}/${folder}` : folder;
+      const existing = this.app.vault.getAbstractFileByPath(current);
+      if (existing && existing instanceof import_obsidian.TFolder) {
+        continue;
+      }
+      if (!existing) {
+        await this.app.vault.createFolder(current);
+      }
+    }
+  }
+};
+function isSafePath(path) {
+  if (!path) {
+    return false;
+  }
+  if (path.startsWith("/") || path.startsWith("\\")) {
+    return false;
+  }
+  if (path.includes("..")) {
+    return false;
+  }
+  return true;
+}
+
+// src/services/markdown_repository.ts
+var MarkdownRepository = class {
+  constructor(app) {
+    this.storage = new MarkdownStorage(app);
+  }
+  async read(path) {
+    return this.storage.read(path);
+  }
+  async write(path, content) {
+    await this.storage.write(path, content);
+  }
+};
+
+// src/ui/interaction.ts
+function enableTapToBlur(container) {
+  container.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target) {
+      return;
+    }
+    if (target.closest("input, textarea, select, button, a, .lifeplanner-no-blur")) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active && container.contains(active)) {
+      active.blur();
+    }
+  });
+}
+function registerRowMenuClose(scope) {
+  const handler = (event) => {
+    const target = event.target;
+    if (target && target.closest(".lifeplanner-row-menu")) {
+      return;
+    }
+    scope.querySelectorAll(".lifeplanner-row-menu-list.is-open").forEach((menu) => {
+      menu.classList.remove("is-open");
+    });
+  };
+  document.addEventListener("mousedown", handler, true);
+  return () => {
+    document.removeEventListener("mousedown", handler, true);
+  };
+}
+function attachDeleteMenu(container, scope, onDelete) {
+  attachRowMenu(container, scope, [{ label: "\u524A\u9664", onSelect: onDelete }]);
+}
+function attachRowMenu(container, scope, items) {
+  const menu = container.createEl("div", { cls: "lifeplanner-row-menu" });
+  const menuButton = menu.createEl("button", {
+    text: "\u22EF",
+    cls: "lifeplanner-row-menu-button"
+  });
+  menuButton.setAttr("type", "button");
+  menuButton.setAttr("aria-label", "\u30E1\u30CB\u30E5\u30FC");
+  const menuList = menu.createEl("div", { cls: "lifeplanner-row-menu-list" });
+  items.forEach((item) => {
+    const button = menuList.createEl("button", { text: item.label });
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      menuList.classList.remove("is-open");
+      item.onSelect();
+    });
+  });
+  menuButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    scope.querySelectorAll(".lifeplanner-row-menu-list.is-open").forEach((openMenu) => {
+      if (openMenu !== menuList) {
+        openMenu.classList.remove("is-open");
+      }
+    });
+    menuList.classList.toggle("is-open");
+  });
+}
+
+// src/ui/view_types.ts
+var DASHBOARD_VIEW_TYPE = "lifeplanner-dashboard";
+var WEEKLY_PLAN_VIEW_TYPE = "lifeplanner-weekly-plan";
+var INBOX_VIEW_TYPE = "lifeplanner-inbox";
+var GOALS_VIEW_TYPE = "lifeplanner-goals";
+var GOAL_TASK_VIEW_TYPE = "lifeplanner-goal-task";
+var EXERCISES_VIEW_TYPE = "lifeplanner-exercises";
+var ISSUES_VIEW_TYPE = "lifeplanner-issues";
+var MISSION_VIEW_TYPE = "lifeplanner-mission";
+var HAVE_DO_BE_VIEW_TYPE = "lifeplanner-have-do-be";
+var PROMISE_VIEW_TYPE = "lifeplanner-promise";
+var VALUES_VIEW_TYPE = "lifeplanner-values";
+
+// src/ui/navigation.ts
+var NAV_GROUPS = [
+  {
+    id: "operations",
+    label: "\u65E5\u5E38",
+    items: [
+      { label: "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9", viewType: DASHBOARD_VIEW_TYPE },
+      { label: "\u9031\u9593\u8A08\u753B", viewType: WEEKLY_PLAN_VIEW_TYPE },
+      { label: "Inbox", viewType: INBOX_VIEW_TYPE },
+      { label: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3", viewType: GOAL_TASK_VIEW_TYPE },
+      { label: "\u30A4\u30B7\u30E5\u30FC", viewType: ISSUES_VIEW_TYPE },
+      { label: "\u76EE\u6A19", viewType: GOALS_VIEW_TYPE },
+      { label: "\u7D04\u675F", viewType: PROMISE_VIEW_TYPE }
+    ]
+  },
+  {
+    id: "foundation",
+    label: "\u5185\u7701",
+    items: [
+      { label: "\u30DF\u30C3\u30B7\u30E7\u30F3", viewType: MISSION_VIEW_TYPE },
+      { label: "\u4FA1\u5024\u89B3", viewType: VALUES_VIEW_TYPE },
+      { label: "Have/Do/Be", viewType: HAVE_DO_BE_VIEW_TYPE },
+      { label: "\u6F14\u7FD2", viewType: EXERCISES_VIEW_TYPE }
+    ]
+  }
+];
+var VIEW_GROUP_MAP = /* @__PURE__ */ new Map();
+NAV_GROUPS.forEach((group) => {
+  group.items.forEach((item) => {
+    VIEW_GROUP_MAP.set(item.viewType, group.id);
+  });
+});
+var lastVisitedByGroup = {};
+function resolveGroup(viewType) {
+  const groupId = VIEW_GROUP_MAP.get(viewType);
+  return NAV_GROUPS.find((group) => group.id === groupId) ?? NAV_GROUPS[0];
+}
+function renderNavigation(container, activeViewType, onNavigate, hiddenViewTypes = []) {
+  const hiddenSet = new Set(hiddenViewTypes);
+  const nav = container.createEl("div", { cls: "lifeplanner-nav" });
+  const rawActiveGroup = resolveGroup(activeViewType);
+  lastVisitedByGroup[rawActiveGroup.id] = activeViewType;
+  const visibleGroups = NAV_GROUPS.map((group) => {
+    const visibleItems = group.items.filter(
+      (item) => !hiddenSet.has(item.viewType) || item.viewType === activeViewType
+    );
+    return { ...group, items: visibleItems };
+  }).filter((group) => group.items.length > 0);
+  const activeGroup = visibleGroups.find((group) => group.id === rawActiveGroup.id) ?? visibleGroups[0];
+  const groupRow = nav.createEl("div", { cls: "lifeplanner-nav-groups" });
+  visibleGroups.forEach((group) => {
+    const button = groupRow.createEl("button", {
+      text: group.label,
+      cls: "lifeplanner-nav-group"
+    });
+    button.setAttr("type", "button");
+    if (activeGroup && group.id === activeGroup.id) {
+      button.classList.add("is-active");
+      button.setAttr("aria-current", "page");
+    }
+    button.addEventListener("click", () => {
+      const last = lastVisitedByGroup[group.id];
+      const hasLast = Boolean(last && group.items.some((item) => item.viewType === last));
+      const target = (hasLast ? last : group.items[0]?.viewType) ?? activeViewType;
+      onNavigate(target);
+    });
+  });
+  const tabRow = nav.createEl("div", { cls: "lifeplanner-nav-tabs" });
+  (activeGroup?.items ?? []).forEach((item) => {
+    const button = tabRow.createEl("button", {
+      text: item.label,
+      cls: "lifeplanner-nav-tab"
+    });
+    button.setAttr("type", "button");
+    if (item.viewType === activeViewType) {
+      button.classList.add("is-active");
+      button.setAttr("aria-current", "page");
+    }
+    button.addEventListener("click", () => onNavigate(item.viewType));
+  });
+}
+
+// src/ui/weekly_plan_view.ts
+var import_obsidian2 = require("obsidian");
+
+// src/services/weekly_shared_io.ts
+var ROUTINE_DAYS2 = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
+function serializeWeeklyShared(shared, defaultTags = []) {
+  const lines = [];
+  lines.push("# \u9031\u9593\u5171\u6709");
+  lines.push("");
+  lines.push("## \u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5");
+  lines.push("");
+  lines.push(`| \u884C\u52D5 | ${ROUTINE_DAYS2.join(" | ")} |`);
+  lines.push(`| --- | ${ROUTINE_DAYS2.map(() => "---").join(" | ")} |`);
+  if (shared.routineActions.length === 0) {
+    lines.push(`|  | ${ROUTINE_DAYS2.map(() => "[ ]").join(" | ")} |`);
+  } else {
+    for (const action of shared.routineActions) {
+      const checks = ROUTINE_DAYS2.map(() => "[ ]");
+      lines.push(`| ${action} | ${checks.join(" | ")} |`);
+    }
+  }
+  lines.push("");
+  lines.push("## \u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF");
+  lines.push("");
+  if (shared.roles.length === 0) {
+    lines.push("### \u5F79\u52721");
+    lines.push("");
+  } else {
+    for (const role of shared.roles) {
+      lines.push(`### ${role}`);
+      lines.push("");
+    }
+  }
+  lines.push("## \u6708\u9593\u30C6\u30FC\u30DE");
+  lines.push("");
+  const entries = Object.entries(shared.monthThemes);
+  if (entries.length === 0) {
+    lines.push("- ");
+  } else {
+    for (const [month, theme] of entries) {
+      lines.push(`- ${month}: ${theme}`);
+    }
+  }
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
+}
+function parseWeeklyShared(content) {
+  const routineActions = [];
+  const roles = [];
+  const monthThemes = {};
+  let section = "";
+  let currentRole = null;
+  const lines = content.split("\n");
+  for (const line of lines) {
+    if (line.startsWith("## ")) {
+      section = line.replace(/^##\s+/, "");
+      currentRole = null;
+      continue;
+    }
+    if (section === "\u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5") {
+      if (line.startsWith("|")) {
+        const cells = line.split("|").map((cell) => cell.trim());
+        if (cells.length >= 3 && cells[1] !== "\u884C\u52D5" && cells[1] !== "---") {
+          const title = (cells[1] || "").trim();
+          if (title) {
+            routineActions.push(title);
+          }
+        }
+      }
+      continue;
+    }
+    if (section === "\u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF") {
+      const roleMatch = line.match(/^###\s+(.+)$/);
+      if (roleMatch) {
+        currentRole = roleMatch[1].trim();
+        if (currentRole) {
+          roles.push(currentRole);
+        }
+        continue;
+      }
+      continue;
+    }
+    if (section === "\u6708\u9593\u30C6\u30FC\u30DE") {
+      const themeMatch = line.match(/^\-\s*([0-9]{4}\-[0-9]{2})\s*:\s*(.+)$/);
+      if (themeMatch) {
+        monthThemes[themeMatch[1]] = themeMatch[2].trim();
+      }
+    }
+  }
+  return { routineActions, roles, monthThemes };
+}
+
+// src/ui/weekly_plan_view.ts
+var BASE_DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
+var ROUTINE_DAYS3 = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
+var LEVELS = ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"];
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var WeeklyPlanRenderer = class {
+  constructor(plugin) {
+    this.statusEl = null;
+    this.rootEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose = null;
+    this.lastSavedContent = "";
+    this.loadedPlan = null;
+    this.renderOptions = {};
+    this.weekLabelInput = null;
+    this.monthThemeInput = null;
+    this.routineRows = [];
+    this.roleSections = [];
+    this.actionPlanRows = [];
+    this.reflectionGoodInputs = [];
+    this.reflectionIssueInputs = [];
+    this.dayDateLabels = /* @__PURE__ */ new Map();
+    this.dailyMemoCards = /* @__PURE__ */ new Map();
+    this.tweetSaveTimers = /* @__PURE__ */ new Map();
+    this.saveTimer = null;
+    this.weekOffset = 0;
+    this.weekStart = /* @__PURE__ */ new Date();
+    this.currentWeekPath = "";
+    this.dayOrder = BASE_DAYS;
+    this.plugin = plugin;
+    this.repository = new MarkdownRepository(this.plugin.app);
+    this.tasksService = new TasksService(
+      new MarkdownRepository(this.plugin.app),
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    this.inboxService = new InboxService(
+      this.repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+  }
+  async render(container, options = {}) {
+    this.rootEl = container;
+    await this.renderWeek(options);
+  }
+  async onClose() {
+    this.statusEl = null;
+    this.rootEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
+    this.weekLabelInput = null;
+    this.monthThemeInput = null;
+    this.routineRows = [];
+    this.roleSections = [];
+    this.actionPlanRows = [];
+    this.reflectionGoodInputs = [];
+    this.reflectionIssueInputs = [];
+    this.dayDateLabels.clear();
+    this.dailyMemoCards.clear();
+    this.clearTweetSaveTimers();
+    if (this.saveTimer) {
+      window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+  }
+  async renderWeek(options = {}) {
+    if (!this.rootEl) {
+      return;
+    }
+    const resolvedOptions = {
+      showNavigation: options.showNavigation ?? true,
+      showHeader: options.showHeader ?? true,
+      attachMenuClose: options.attachMenuClose ?? true,
+      onNavigate: options.onNavigate,
+      hiddenViewTypes: options.hiddenViewTypes ?? []
+    };
+    this.renderOptions = resolvedOptions;
+    this.resetViewState();
+    this.rootEl.empty();
+    const view = this.rootEl.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
+    if (resolvedOptions.attachMenuClose) {
+      this.disposeMenuClose = registerRowMenuClose(view);
+    }
+    let prevButton = null;
+    let todayButton = null;
+    let nextButton = null;
+    if (resolvedOptions.showHeader) {
+      const header = view.createEl("div", { cls: "lifeplanner-weekly-header" });
+      header.createEl("h2", { text: "\u9031\u9593\u8A08\u753B" });
+      const navButtons = header.createEl("div", { cls: "lifeplanner-weekly-nav" });
+      prevButton = navButtons.createEl("button", { text: "\u25C0 \u524D\u9031" });
+      todayButton = navButtons.createEl("button", { text: "\u4ECA\u65E5" });
+      nextButton = navButtons.createEl("button", { text: "\u6B21\u9031 \u25B6" });
+    }
+    if (resolvedOptions.showNavigation) {
+      const onNavigate = resolvedOptions.onNavigate ?? (() => {
+      });
+      renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, onNavigate, resolvedOptions.hiddenViewTypes);
+    }
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
+    this.weekStart = computeWeekStart2(/* @__PURE__ */ new Date(), this.weekOffset, this.plugin.settings.weekStart);
+    this.dayOrder = dayOrder(this.plugin.settings.weekStart);
+    const plan = await this.loadPlanForWeek(this.weekStart);
+    this.renderHeaderMeta(view, plan);
+    this.renderMonthTheme(view, plan);
+    this.renderRoutineActions(view, plan);
+    await this.renderRoles(view, plan);
+    await this.renderActionPlans(view, plan);
+    await this.renderDailyMemos(view);
+    this.renderReflection(view, plan);
+    this.updateWeekMeta();
+    if (prevButton) {
+      prevButton.addEventListener("click", () => {
+        void this.changeWeek(-1);
+      });
+    }
+    if (todayButton) {
+      todayButton.addEventListener("click", () => {
+        void this.resetToToday();
+      });
+    }
+    if (nextButton) {
+      nextButton.addEventListener("click", () => {
+        void this.changeWeek(1);
+      });
+    }
+  }
+  resetViewState() {
+    this.weekLabelInput = null;
+    this.monthThemeInput = null;
+    this.routineRows = [];
+    this.roleSections = [];
+    this.actionPlanRows = [];
+    this.reflectionGoodInputs = [];
+    this.reflectionIssueInputs = [];
+    this.dayDateLabels.clear();
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
+    this.clearTweetSaveTimers();
+    if (this.saveTimer) {
+      window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+  }
+  async changeWeek(delta) {
+    await this.savePlan();
+    this.weekOffset += delta;
+    await this.renderWeek(this.renderOptions);
+  }
+  async resetToToday() {
+    await this.savePlan();
+    this.weekOffset = 0;
+    await this.renderWeek(this.renderOptions);
+  }
+  renderHeaderMeta(container, plan) {
+    const section = container.createEl("div", { cls: "lifeplanner-weekly-top" });
+    const meta = section.createEl("div", { cls: "lifeplanner-weekly-goals" });
+    const header = meta.createEl("div", { cls: "lifeplanner-weekly-section-header" });
+    header.createEl("h3", { text: "\u9031\u8868\u793A" });
+    const weekLabel = header.createEl("input", { type: "text" });
+    weekLabel.placeholder = "2026\u5E74 1\u6708 \u7B2C3\u9031";
+    weekLabel.value = plan.weekLabel ?? "";
+    weekLabel.readOnly = true;
+    this.weekLabelInput = weekLabel;
+  }
+  renderMonthTheme(container, plan) {
+    const section = container.createEl("div", {
+      cls: "lifeplanner-weekly-section lifeplanner-month-theme"
+    });
+    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
+    header.createEl("h3", { text: "\u4ECA\u6708\u306E\u30C6\u30FC\u30DE" });
+    const menuScope = this.viewEl ?? section;
+    const body = section.createEl("div", { cls: "lifeplanner-month-theme-body" });
+    const display = body.createEl("div", { cls: "lifeplanner-month-theme-display" });
+    const input = body.createEl("textarea", { cls: "lifeplanner-month-theme-input" });
+    input.placeholder = "\u4ECA\u6708\u306E\u30C6\u30FC\u30DE";
+    input.rows = 2;
+    input.value = plan.monthTheme ?? "";
+    const updateDisplay = () => {
+      const value = input.value.trim();
+      display.setText(value || "(\u672A\u8A18\u5165)");
+      display.classList.toggle("is-empty", value.length === 0);
+    };
+    const setEditMode = (editing) => {
+      input.classList.toggle("lifeplanner-hidden", !editing);
+      display.classList.toggle("lifeplanner-hidden", editing);
+      if (editing) {
+        this.autoResize(input);
+        input.focus();
+      }
+    };
+    attachRowMenu(header, menuScope, [
+      {
+        label: "\u7DE8\u96C6",
+        onSelect: () => {
+          setEditMode(true);
+        }
+      },
+      {
+        label: "\u524A\u9664",
+        onSelect: () => {
+          input.value = "";
+          updateDisplay();
+          setEditMode(false);
+          this.autoResize(input);
+          this.scheduleSave();
+        }
+      }
+    ]);
+    input.addEventListener("input", () => {
+      updateDisplay();
+      this.autoResize(input);
+      this.scheduleSave();
+    });
+    input.addEventListener("blur", () => {
+      updateDisplay();
+      setEditMode(false);
+    });
+    updateDisplay();
+    setEditMode(false);
+    this.monthThemeInput = input;
+  }
+  renderRoutineActions(container, plan) {
+    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
+    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
+    header.createEl("h3", { text: "\u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5" });
+    const addButton = header.createEl("button", { text: "\u8FFD\u52A0" });
+    const table = section.createEl("div", { cls: "lifeplanner-routine-table" });
+    const headerRow = table.createEl("div", { cls: "lifeplanner-routine-row is-header" });
+    headerRow.createEl("div", { text: "\u884C\u52D5" });
+    const routineDays = ROUTINE_DAYS3;
+    routineDays.forEach((day) => {
+      headerRow.createEl("div", { text: day });
+    });
+    const addRow = (title, checks) => {
+      const row = table.createEl("div", { cls: "lifeplanner-routine-row" });
+      const titleInput = row.createEl("input", { type: "text" });
+      titleInput.value = title;
+      titleInput.placeholder = "\u30EB\u30FC\u30C6\u30A3\u30F3";
+      titleInput.addEventListener("input", () => this.scheduleSave());
+      const checksMap = /* @__PURE__ */ new Map();
+      routineDays.forEach((day) => {
+        const cell = row.createEl("div", { cls: "lifeplanner-routine-day" });
+        cell.setAttr("data-day", day);
+        const checkbox = cell.createEl("input", { type: "checkbox" });
+        checkbox.checked = Boolean(checks[day]);
+        checkbox.addEventListener("change", () => this.scheduleSave());
+        checksMap.set(day, checkbox);
+      });
+      const menuScope = this.viewEl ?? row;
+      attachDeleteMenu(row, menuScope, () => {
+        row.remove();
+        this.routineRows = this.routineRows.filter((item) => item.titleInput !== titleInput);
+        this.scheduleSave();
+      });
+      this.routineRows.push({ titleInput, checks: checksMap });
+    };
+    addButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      addRow("", {});
+      this.scheduleSave();
+    });
+    if (plan.routineActions.length === 0) {
+      addRow("", {});
+    } else {
+      plan.routineActions.forEach((action) => addRow(action.title, action.checks));
+    }
+  }
+  async renderRoles(container, plan) {
+    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
+    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
+    header.createEl("h3", { text: "\u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF" });
+    const addRoleButton = header.createEl("button", { text: "\u5F79\u5272\u3092\u8FFD\u52A0" });
+    const rolesWrap = section.createEl("div", { cls: "lifeplanner-roles" });
+    const shared = await this.loadShared();
+    const sharedRoles = shared.roles.length > 0 ? shared.roles : plan.roles.map((role) => role.role);
+    const addRole = (roleName, goals) => {
+      const roleCard = rolesWrap.createEl("div", { cls: "lifeplanner-role-card" });
+      const roleHeader = roleCard.createEl("div", { cls: "lifeplanner-role-header" });
+      const roleInput = roleHeader.createEl("input", { type: "text" });
+      roleInput.placeholder = "\u5F79\u5272\u540D";
+      roleInput.value = roleName;
+      roleInput.addEventListener("input", () => this.scheduleSave());
+      const goalsWrap = roleCard.createEl("div", { cls: "lifeplanner-weekly-list" });
+      const actions = roleCard.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
+      const addGoalButton = actions.createEl("button", { text: "\u76EE\u6A19\u3092\u8FFD\u52A0" });
+      const goalInputs = [];
+      const addGoal = (goalValue) => {
+        const row = goalsWrap.createEl("div", { cls: "lifeplanner-weekly-list-row" });
+        const input = row.createEl("input", { type: "text" });
+        input.placeholder = "\u76EE\u6A19";
+        input.value = goalValue;
+        input.addEventListener("input", () => this.scheduleSave());
+        const menuScope2 = this.viewEl ?? row;
+        attachDeleteMenu(row, menuScope2, () => {
+          row.remove();
+          const index = goalInputs.indexOf(input);
+          if (index >= 0) {
+            goalInputs.splice(index, 1);
+          }
+          this.scheduleSave();
+        });
+        goalInputs.push(input);
+      };
+      addGoalButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        addGoal("");
+        this.scheduleSave();
+      });
+      const menuScope = this.viewEl ?? roleCard;
+      attachDeleteMenu(roleHeader, menuScope, () => {
+        roleCard.remove();
+        this.roleSections = this.roleSections.filter((item) => item.roleInput !== roleInput);
+        this.scheduleSave();
+      });
+      if (goals.length === 0) {
+        addGoal("");
+      } else {
+        goals.forEach((goal) => addGoal(goal));
+      }
+      this.roleSections.push({ roleInput, goalInputs });
+    };
+    addRoleButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      addRole("\u65B0\u3057\u3044\u5F79\u5272", []);
+      this.scheduleSave();
+    });
+    if (sharedRoles.length === 0) {
+      addRole("\u5F79\u52721", []);
+    } else {
+      sharedRoles.forEach((roleName) => {
+        const planRole = plan.roles.find((role) => role.role === roleName);
+        addRole(roleName, planRole?.goals ?? []);
+      });
+    }
+  }
+  async renderActionPlans(container, plan) {
+    const section = container.createEl("div", {
+      cls: "lifeplanner-weekly-section lifeplanner-action-plan-section"
+    });
+    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
+    header.createEl("h3", { text: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3" });
+    const addButton = header.createEl("button", { text: "\u8FFD\u52A0" });
+    section.createEl("div", {
+      cls: "lifeplanner-action-plan-hint",
+      text: "\u76EE\u6A19/\u30BF\u30B9\u30AF\u304B\u3089\u9078\u3093\u3067\u9031\u9593\u8A08\u753B\u306B\u7D10\u3065\u3051\u307E\u3059\u3002"
+    });
+    const list = section.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list"
+    });
+    const hiddenWrap = section.createEl("div", { cls: "lifeplanner-action-plan-hidden" });
+    const hiddenHeader = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-action-plan-hidden-header"
+    });
+    const hiddenToggle = hiddenHeader.createEl("button", { text: "\u975E\u8868\u793A\u30EA\u30B9\u30C8" });
+    const hiddenList = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list is-hidden"
+    });
+    this.actionPlanRows = [];
+    const tasks = await this.tasksService.listTasks();
+    const goalsService = new GoalsService(
+      new MarkdownRepository(this.plugin.app),
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    const goals = await goalsService.listGoals();
+    const minLevelIndex = LEVELS.indexOf(this.plugin.settings.actionPlanMinLevel);
+    const goalLevelMap = /* @__PURE__ */ new Map();
+    const goalTitleMap = /* @__PURE__ */ new Map();
+    goals.forEach((goal) => {
+      const levelIndex = LEVELS.indexOf(goal.level);
+      if (levelIndex >= minLevelIndex) {
+        goalLevelMap.set(goal.id, goal.level);
+        goalLevelMap.set(goal.title, goal.level);
+      }
+      goalTitleMap.set(goal.id, goal.title);
+      goalTitleMap.set(goal.title, goal.title);
+    });
+    const options = tasks.filter((task) => {
+      const level = goalLevelMap.get(task.goalId);
+      if (!level) {
+        return true;
+      }
+      const levelIndex = LEVELS.indexOf(level);
+      return levelIndex >= minLevelIndex;
+    }).map((task) => {
+      const value = `${task.goalId} / ${task.title}`;
+      const label = task.title;
+      return { value, label };
+    });
+    let hiddenOpen = false;
+    const setHiddenOpen = (open) => {
+      hiddenOpen = open;
+      hiddenList.classList.toggle("is-hidden", !hiddenOpen);
+    };
+    const updateHiddenCount = () => {
+      const count = hiddenList.querySelectorAll(".lifeplanner-action-plan-row").length;
+      hiddenToggle.setText(`\u975E\u8868\u793A\u30EA\u30B9\u30C8 (${count})`);
+      hiddenWrap.classList.toggle("is-empty", count === 0);
+      if (count === 0) {
+        setHiddenOpen(false);
+      }
+    };
+    const moveRow = (row, done) => {
+      const target = done ? hiddenList : list;
+      if (row.parentElement !== target) {
+        target.appendChild(row);
+      }
+      updateHiddenCount();
+    };
+    hiddenToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      setHiddenOpen(!hiddenOpen);
+    });
+    const addRow = (value, done) => {
+      const row = list.createEl("div", { cls: "lifeplanner-action-plan-row" });
+      const checkbox = row.createEl("input", {
+        type: "checkbox",
+        cls: "lifeplanner-action-plan-checkbox"
+      });
+      checkbox.checked = done;
+      checkbox.addEventListener("change", () => {
+        moveRow(row, checkbox.checked);
+        this.scheduleSave();
+      });
+      const select = row.createEl("select", { cls: "lifeplanner-action-plan-select" });
+      const placeholder = select.createEl("option", { text: "\u9078\u629E", value: "" });
+      placeholder.disabled = true;
+      placeholder.selected = !value;
+      options.forEach((option) => {
+        select.createEl("option", { text: option.label, value: option.value });
+      });
+      const optionValues = options.map((option) => option.value);
+      if (value && !optionValues.includes(value)) {
+        const goalId = value.split(" / ")[0];
+        const label = value.split(" / ")[1] ?? goalTitleMap.get(goalId) ?? value;
+        select.createEl("option", { text: label, value });
+      }
+      select.value = value;
+      select.addEventListener("change", () => this.scheduleSave());
+      const menuScope = this.viewEl ?? row;
+      attachDeleteMenu(row, menuScope, () => {
+        row.remove();
+        this.actionPlanRows = this.actionPlanRows.filter((item) => item.select !== select);
+        updateHiddenCount();
+        this.scheduleSave();
+      });
+      this.actionPlanRows.push({ select, checkbox });
+      moveRow(row, done);
+    };
+    const actions = section.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
+    actions.appendChild(addButton);
+    addButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      addRow("", false);
+      this.scheduleSave();
+    });
+    if (plan.actionPlans.length === 0) {
+      addRow("", false);
+    } else {
+      plan.actionPlans.forEach((item) => addRow(item.title, item.done));
+    }
+    updateHiddenCount();
+  }
+  renderReflection(container, plan) {
+    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
+    section.createEl("h3", { text: "\u4ECA\u9031\u306E\u632F\u308A\u8FD4\u308A" });
+    const grid = section.createEl("div", { cls: "lifeplanner-weekly-reflection" });
+    const goodWrap = grid.createEl("div", { cls: "lifeplanner-weekly-reflection-card" });
+    goodWrap.createEl("h4", { text: "\u826F\u304B\u3063\u305F\u3053\u3068" });
+    const goodList = goodWrap.createEl("div", { cls: "lifeplanner-weekly-list" });
+    const goodActions = goodWrap.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
+    const addGood = goodActions.createEl("button", { text: "\u8FFD\u52A0" });
+    const issueWrap = grid.createEl("div", { cls: "lifeplanner-weekly-reflection-card" });
+    issueWrap.createEl("h4", { text: "\u8AB2\u984C" });
+    const issueList = issueWrap.createEl("div", { cls: "lifeplanner-weekly-list" });
+    const issueActions = issueWrap.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
+    const addIssue = issueActions.createEl("button", { text: "\u8FFD\u52A0" });
+    addGood.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.addReflectionItem(goodList, this.reflectionGoodInputs, "\u632F\u308A\u8FD4\u308A");
+      this.scheduleSave();
+    });
+    addIssue.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.addReflectionItem(issueList, this.reflectionIssueInputs, "\u8AB2\u984C");
+      this.scheduleSave();
+    });
+    if (plan.reflectionGood.length === 0) {
+      this.addReflectionItem(goodList, this.reflectionGoodInputs, "\u632F\u308A\u8FD4\u308A");
+    } else {
+      plan.reflectionGood.forEach(
+        (item) => this.addReflectionItem(goodList, this.reflectionGoodInputs, "\u632F\u308A\u8FD4\u308A", item)
+      );
+    }
+    if (plan.reflectionIssues.length === 0) {
+      this.addReflectionItem(issueList, this.reflectionIssueInputs, "\u8AB2\u984C");
+    } else {
+      plan.reflectionIssues.forEach(
+        (item) => this.addReflectionItem(issueList, this.reflectionIssueInputs, "\u8AB2\u984C", item)
+      );
+    }
+  }
+  addReflectionItem(container, inputs, placeholder, value = "") {
+    const row = container.createEl("div", { cls: "lifeplanner-weekly-list-row" });
+    const input = row.createEl("input", { type: "text" });
+    input.placeholder = placeholder;
+    input.value = value;
+    input.addEventListener("input", () => this.scheduleSave());
+    const menuScope = this.viewEl ?? row;
+    attachDeleteMenu(row, menuScope, () => {
+      row.remove();
+      const index = inputs.indexOf(input);
+      if (index >= 0) {
+        inputs.splice(index, 1);
+      }
+      this.scheduleSave();
+    });
+    inputs.push(input);
+  }
+  async renderDailyMemos(container) {
+    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
+    section.createEl("h3", { text: "\u65E5\u4ED8\u3054\u3068\u306E\u30E1\u30E2" });
+    const grid = section.createEl("div", { cls: "lifeplanner-daily-memos" });
+    const items = await this.inboxService.listItems();
+    const weekStart = new Date(this.weekStart);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+    const itemsByDay = /* @__PURE__ */ new Map();
+    this.dayOrder.forEach((day) => itemsByDay.set(day, []));
+    items.forEach((item) => {
+      if (typeof item.createdAt !== "number") {
+        return;
+      }
+      const created = new Date(item.createdAt);
+      if (created < weekStart || created >= weekEnd) {
+        return;
+      }
+      const diff = Math.floor((startOfDay(created).getTime() - weekStart.getTime()) / DAY_MS);
+      const day = this.dayOrder[diff];
+      if (!day) {
+        return;
+      }
+      itemsByDay.get(day)?.push(item);
+    });
+    const buildMemoRow = (list, item) => {
+      const row = list.createEl("div", { cls: "lifeplanner-tweet-row" });
+      row.setAttribute("data-created-at", `${item.createdAt ?? 0}`);
+      row.createEl("span", {
+        cls: "lifeplanner-tweet-time",
+        text: formatTime(item.createdAt)
+      });
+      const input = row.createEl("input", { type: "text", cls: "lifeplanner-tweet-input" });
+      input.value = item.content;
+      let lastSaved = item.content;
+      input.addEventListener("input", () => {
+        const nextValue = input.value.trim();
+        if (!nextValue || nextValue === lastSaved) {
+          return;
+        }
+        lastSaved = nextValue;
+        this.scheduleTweetSave(item.id, nextValue);
+      });
+      input.addEventListener("blur", () => {
+        if (input.value.trim().length === 0) {
+          input.value = lastSaved;
+          this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+        }
+      });
+      const menuScope = this.viewEl ?? row;
+      attachDeleteMenu(row, menuScope, () => {
+        void this.inboxService.deleteItem(item.id).then(() => {
+          row.remove();
+          if (list.querySelectorAll(".lifeplanner-tweet-row").length === 0) {
+            list.createEl("div", { cls: "lifeplanner-tweet-empty", text: "(\u672A\u767B\u9332)" });
+          }
+          this.setStatus("\u524A\u9664\u3057\u307E\u3057\u305F");
+        });
+      });
+      return row;
+    };
+    const insertMemoRow = (list, row, createdAt) => {
+      const value = createdAt ?? 0;
+      const rows = Array.from(list.querySelectorAll(".lifeplanner-tweet-row"));
+      const before = rows.find((existing) => {
+        const existingValue = Number(existing.getAttribute("data-created-at") ?? 0);
+        return existingValue > value;
+      });
+      if (before) {
+        list.insertBefore(row, before);
+      } else {
+        list.appendChild(row);
+      }
+    };
+    const clearEmptyState = (list) => {
+      list.querySelectorAll(".lifeplanner-tweet-empty").forEach((empty) => {
+        empty.remove();
+      });
+    };
+    const addMemo = async (list, baseDate, input) => {
+      const content = input.value.trim();
+      if (!content) {
+        this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+        input.focus();
+        return;
+      }
+      const now = /* @__PURE__ */ new Date();
+      const created = new Date(baseDate);
+      created.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+      const item = await this.inboxService.addItem(content, created.getTime());
+      input.value = "";
+      clearEmptyState(list);
+      const row = buildMemoRow(list, item);
+      insertMemoRow(list, row, item.createdAt);
+      this.setStatus("\u30E1\u30E2\u3092\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+    };
+    this.dayOrder.forEach((day, index) => {
+      const card = grid.createEl("div", { cls: "lifeplanner-daily-memo-card" });
+      this.dailyMemoCards.set(day, card);
+      const header = card.createEl("div", { cls: "lifeplanner-daily-memo-header" });
+      header.createEl("h4", { text: day });
+      const dateLabel = header.createEl("span", { cls: "lifeplanner-daily-memo-date" });
+      this.dayDateLabels.set(day, dateLabel);
+      const addRow = card.createEl("div", { cls: "lifeplanner-daily-memo-add" });
+      const addInput = addRow.createEl("input", {
+        type: "text",
+        cls: "lifeplanner-daily-memo-input"
+      });
+      addInput.placeholder = "\u30E1\u30E2\u3092\u8FFD\u52A0";
+      const addButton = addRow.createEl("button", { text: "\u8FFD\u52A0" });
+      addButton.setAttr("type", "button");
+      const list = card.createEl("div", { cls: "lifeplanner-weekly-list" });
+      const dayItems = itemsByDay.get(day) ?? [];
+      if (dayItems.length === 0) {
+        list.createEl("div", { cls: "lifeplanner-tweet-empty", text: "(\u672A\u767B\u9332)" });
+      }
+      const dayDate = new Date(weekStart);
+      dayDate.setDate(weekStart.getDate() + index);
+      const handleAdd = () => {
+        void addMemo(list, dayDate, addInput);
+      };
+      addButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        handleAdd();
+      });
+      addInput.addEventListener("keydown", (event) => {
+        if (event.isComposing || event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        handleAdd();
+      });
+      dayItems.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)).forEach((item) => {
+        const row = buildMemoRow(list, item);
+        insertMemoRow(list, row, item.createdAt);
+      });
+    });
+  }
+  async loadPlanForWeek(weekStart) {
+    const path = resolveWeeklyPlanPath(weekStart, this.plugin.settings.storageDir);
+    this.currentWeekPath = path;
+    let content = await this.repository.read(path);
+    if (!content) {
+      const legacyPath = resolveWeeklyPlanPath(weekStart, this.plugin.settings.storageDir, {
+        forceMonday: false
+      });
+      if (legacyPath !== path) {
+        const legacyContent = await this.repository.read(legacyPath);
+        if (legacyContent) {
+          await this.repository.write(path, legacyContent);
+          content = legacyContent;
+        }
+      }
+    }
+    if (!content) {
+      const emptyPlan2 = this.buildEmptyPlan();
+      const shared = await this.loadShared();
+      emptyPlan2.weekLabel = formatWeekLabel(weekStart, this.plugin.settings.weekStart);
+      emptyPlan2.monthTheme = shared.monthThemes[getMonthKey(weekStart)] ?? "";
+      emptyPlan2.routineActions = shared.routineActions.map((title) => ({
+        title,
+        checks: {}
+      }));
+      emptyPlan2.roles = shared.roles.map((role) => ({
+        role,
+        goals: []
+      }));
+      const serialized = serializeWeeklyPlan(emptyPlan2, this.plugin.settings.defaultTags);
+      this.lastSavedContent = serialized;
+      await this.repository.write(path, serialized);
+      this.loadedPlan = emptyPlan2;
+      return emptyPlan2;
+    }
+    this.lastSavedContent = content;
+    const plan = parseWeeklyPlan(content);
+    this.loadedPlan = plan;
+    return plan;
+  }
+  async loadShared() {
+    const path = resolveLifePlannerPath("Weekly Shared", this.plugin.settings.storageDir);
+    const content = await this.repository.read(path);
+    if (!content) {
+      const emptyShared = {
+        routineActions: [],
+        roles: [],
+        monthThemes: {}
+      };
+      await this.repository.write(
+        path,
+        serializeWeeklyShared(emptyShared, this.plugin.settings.defaultTags)
+      );
+      return emptyShared;
+    }
+    return parseWeeklyShared(content);
+  }
+  async saveShared(plan) {
+    const shared = await this.loadShared();
+    shared.routineActions = plan.routineActions.map((action) => action.title.trim()).filter((title) => title.length > 0);
+    shared.roles = this.roleSections.map((role) => role.roleInput.value.trim()).filter((value) => value.length > 0);
+    shared.monthThemes[getMonthKey(this.weekStart)] = plan.monthTheme ?? "";
+    const path = resolveLifePlannerPath("Weekly Shared", this.plugin.settings.storageDir);
+    await this.repository.write(
+      path,
+      serializeWeeklyShared(shared, this.plugin.settings.defaultTags)
+    );
+  }
+  buildEmptyPlan() {
+    const slots = BASE_DAYS.map((day) => ({ day, entries: [] }));
+    return {
+      id: "weekly",
+      weekStart: "",
+      weekEnd: "",
+      weeklyGoals: [],
+      weekLabel: "",
+      monthTheme: "",
+      routineActions: [],
+      roles: [],
+      actionPlans: [],
+      reflectionGood: [],
+      reflectionIssues: [],
+      dailyMemos: { \u6708: [], \u706B: [], \u6C34: [], \u6728: [], \u91D1: [], \u571F: [], \u65E5: [] },
+      slots
+    };
+  }
+  async savePlan() {
+    const plan = this.loadedPlan ? { ...this.loadedPlan } : this.buildEmptyPlan();
+    if (!plan.slots || plan.slots.length === 0) {
+      plan.slots = BASE_DAYS.map((day) => ({ day, entries: [] }));
+    }
+    plan.weeklyGoals = [];
+    plan.weekLabel = this.weekLabelInput ? this.weekLabelInput.value.trim() : "";
+    plan.monthTheme = this.monthThemeInput ? this.monthThemeInput.value.trim() : "";
+    plan.routineActions = this.routineRows.map((row) => {
+      const title = row.titleInput.value.trim();
+      const checks = {};
+      row.checks.forEach((checkbox, day) => {
+        checks[day] = checkbox.checked;
+      });
+      return { title, checks };
+    }).filter((row) => row.title.length > 0);
+    plan.roles = this.roleSections.map((role) => ({
+      role: role.roleInput.value.trim(),
+      goals: role.goalInputs.map((input) => input.value.trim()).filter((value) => value.length > 0)
+    })).filter((role) => role.role.length > 0);
+    plan.actionPlans = this.actionPlanRows.map((row) => ({
+      title: row.select.value.trim(),
+      done: row.checkbox.checked
+    })).filter((item) => item.title.length > 0);
+    plan.reflectionGood = this.reflectionGoodInputs.map((input) => input.value.trim()).filter((value) => value.length > 0);
+    plan.reflectionIssues = this.reflectionIssueInputs.map((input) => input.value.trim()).filter((value) => value.length > 0);
+    for (const day of BASE_DAYS) {
+      const slot = plan.slots.find((entry) => entry.day === day);
+      if (slot) {
+        const dateLabel = this.dayDateLabels.get(day);
+        slot.dateLabel = dateLabel ? dateLabel.textContent ?? "" : "";
+      }
+    }
+    const serialized = serializeWeeklyPlan(plan, this.plugin.settings.defaultTags);
+    if (serialized === this.lastSavedContent) {
+      this.setStatus("\u5909\u66F4\u306F\u3042\u308A\u307E\u305B\u3093");
+      return;
+    }
+    await this.repository.write(this.currentWeekPath, serialized);
+    this.lastSavedContent = serialized;
+    this.loadedPlan = plan;
+    await this.saveShared(plan);
+    this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+  }
+  setStatus(message) {
+    if (!this.statusEl) {
+      return;
+    }
+    this.statusEl.setText(message);
+    window.setTimeout(() => {
+      this.statusEl?.setText("");
+    }, 2e3);
+  }
+  scheduleTweetSave(itemId, content) {
+    const existing = this.tweetSaveTimers.get(itemId);
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+    const timer = window.setTimeout(() => {
+      void this.inboxService.updateItem(itemId, content).then(() => {
+        this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+      });
+      this.tweetSaveTimers.delete(itemId);
+    }, 400);
+    this.tweetSaveTimers.set(itemId, timer);
+  }
+  scheduleSave() {
+    if (this.saveTimer) {
+      window.clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = window.setTimeout(() => {
+      void this.savePlan();
+    }, 500);
+  }
+  clearTweetSaveTimers() {
+    this.tweetSaveTimers.forEach((timer) => {
+      window.clearTimeout(timer);
+    });
+    this.tweetSaveTimers.clear();
+  }
+  updateWeekMeta() {
+    this.weekStart = computeWeekStart2(/* @__PURE__ */ new Date(), this.weekOffset, this.plugin.settings.weekStart);
+    const weekLabel = formatWeekLabel(this.weekStart, this.plugin.settings.weekStart);
+    if (this.weekLabelInput) {
+      this.weekLabelInput.value = weekLabel;
+    }
+    this.dayOrder.forEach((day, index) => {
+      const date = new Date(this.weekStart);
+      date.setDate(this.weekStart.getDate() + index);
+      const label = this.dayDateLabels.get(day);
+      if (label) {
+        label.setText(formatFullDate(date));
+      }
+      const card = this.dailyMemoCards.get(day);
+      if (card) {
+        card.classList.toggle("is-today", isSameDay(date, /* @__PURE__ */ new Date()));
+      }
+    });
+  }
+  autoResize(textarea) {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+};
+var WeeklyPlanView = class extends import_obsidian2.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.renderer = new WeeklyPlanRenderer(plugin);
+  }
+  getViewType() {
+    return WEEKLY_PLAN_VIEW_TYPE;
+  }
+  getDisplayText() {
+    return "\u9031\u9593\u8A08\u753B";
+  }
+  async onOpen() {
+    await this.renderer.render(this.contentEl, {
+      showNavigation: true,
+      showHeader: true,
+      attachMenuClose: true,
+      onNavigate: (viewType) => {
+        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      },
+      hiddenViewTypes: this.plugin.settings.hiddenTabs
+    });
+  }
+  async renderEmbedded(container, options = {}) {
+    await this.renderer.render(container, {
+      showNavigation: options.showNavigation ?? false,
+      showHeader: options.showHeader ?? true,
+      attachMenuClose: options.attachMenuClose ?? false,
+      onNavigate: options.onNavigate,
+      hiddenViewTypes: options.hiddenViewTypes
+    });
+  }
+  async onClose() {
+    await this.renderer.onClose();
+  }
+};
+function computeWeekStart2(today, offset, weekStart) {
+  const base = new Date(today);
+  base.setDate(base.getDate() + offset * 7);
+  const day = base.getDay();
+  const startIndex = weekStart === "sunday" ? 0 : 1;
+  const diff = (day - startIndex + 7) % 7;
+  const start = new Date(base);
+  start.setDate(base.getDate() - diff);
+  return start;
+}
+function formatWeekLabel(weekStart, weekStartSetting) {
+  const year = weekStart.getFullYear();
+  const month = weekStart.getMonth() + 1;
+  const weekNumber = weekOfMonth(weekStart, weekStartSetting);
+  return `${year}\u5E74 ${month}\u6708 \u7B2C${weekNumber}\u9031`;
+}
+function weekOfMonth(date, weekStartSetting) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const firstDay = firstOfMonth.getDay();
+  const firstWeekStart = new Date(firstOfMonth);
+  const startIndex = weekStartSetting === "sunday" ? 0 : 1;
+  const offset = (firstDay - startIndex + 7) % 7;
+  firstWeekStart.setDate(firstOfMonth.getDate() - offset);
+  const diffMs = date.getTime() - firstWeekStart.getTime();
+  return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1e3)) + 1;
+}
+function getMonthKey(date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  return `${year}-${month}`;
+}
+function formatFullDate(date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}/${month}/${day}`;
+}
+function formatTime(timestamp) {
+  if (!timestamp) {
+    return "--:--";
+  }
+  const date = new Date(timestamp);
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+function startOfDay(date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+function dayOrder(weekStart) {
+  return weekStart === "sunday" ? ["\u65E5", "\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"] : BASE_DAYS;
+}
+
+// src/ui/dashboard_view.ts
+var DASHBOARD_SECTIONS = NAV_GROUPS.flatMap(
+  (group) => group.items.map((item) => ({
+    label: item.label,
+    viewType: item.viewType,
+    groupLabel: group.label
+  }))
+).filter((item) => item.viewType !== DASHBOARD_VIEW_TYPE);
+var DashboardView = class extends import_obsidian3.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.embeddedWeekly = null;
+    this.disposeMenuClose = null;
+    this.statusEl = null;
+    this.plugin = plugin;
+  }
+  getViewType() {
+    return DASHBOARD_VIEW_TYPE;
+  }
+  getDisplayText() {
+    return "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9";
+  }
+  async onOpen() {
+    await this.renderDashboard();
+  }
+  async onClose() {
+    await this.cleanupEmbeddedWeekly();
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
+    this.statusEl = null;
+    this.contentEl.empty();
+  }
+  async cleanupEmbeddedWeekly() {
+    if (!this.embeddedWeekly) {
+      return;
+    }
+    await this.embeddedWeekly.onClose();
+    this.embeddedWeekly = null;
+  }
+  buildServices() {
+    const repository = new MarkdownRepository(this.plugin.app);
+    return {
+      repository,
+      inboxService: new InboxService(
+        repository,
+        this.plugin.settings.storageDir,
+        this.plugin.settings.defaultTags
+      ),
+      inboxTriage: new InboxTriage(
+        repository,
+        this.plugin.settings.storageDir,
+        this.plugin.settings.weekStart,
+        this.plugin.settings.defaultTags
+      ),
+      goalsService: new GoalsService(
+        repository,
+        this.plugin.settings.storageDir,
+        this.plugin.settings.defaultTags
+      ),
+      tasksService: new TasksService(
+        repository,
+        this.plugin.settings.storageDir,
+        this.plugin.settings.defaultTags
+      ),
+      issuesService: new IssuesService(
+        repository,
+        this.plugin.settings.storageDir,
+        this.plugin.settings.defaultTags
+      )
+    };
+  }
+  async renderDashboard() {
+    const container = this.contentEl;
+    await this.cleanupEmbeddedWeekly();
+    this.disposeMenuClose?.();
+    container.empty();
+    const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
+    this.disposeMenuClose = registerRowMenuClose(view);
+    view.createEl("h2", { text: "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9" });
+    renderNavigation(
+      view,
+      DASHBOARD_VIEW_TYPE,
+      (viewType) => {
+        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs
+    );
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-dashboard-status" });
+    const selected = new Set(this.plugin.settings.dashboardSections);
+    const controls = view.createEl("div", { cls: "lifeplanner-dashboard-controls" });
+    controls.createEl("h3", { text: "\u8868\u793A\u30BB\u30AF\u30B7\u30E7\u30F3" });
+    const groupsWrap = controls.createEl("div", { cls: "lifeplanner-dashboard-groups" });
+    const updateSettings = async (viewType, enabled) => {
+      const updated = new Set(this.plugin.settings.dashboardSections);
+      if (enabled) {
+        updated.add(viewType);
+      } else {
+        updated.delete(viewType);
+      }
+      this.plugin.settings.dashboardSections = Array.from(updated);
+      await this.plugin.saveSettings();
+      void this.renderDashboard();
+    };
+    NAV_GROUPS.forEach((group) => {
+      const items = group.items.filter((item) => item.viewType !== DASHBOARD_VIEW_TYPE);
+      if (items.length === 0) {
+        return;
+      }
+      const groupBlock = groupsWrap.createEl("div", { cls: "lifeplanner-dashboard-group" });
+      groupBlock.createEl("h4", { text: group.label });
+      const toggles = groupBlock.createEl("div", { cls: "lifeplanner-dashboard-toggles" });
+      items.forEach((item) => {
+        const label = toggles.createEl("label", { cls: "lifeplanner-dashboard-toggle" });
+        const checkbox = label.createEl("input", { type: "checkbox" });
+        checkbox.checked = selected.has(item.viewType);
+        label.createEl("span", { text: item.label });
+        checkbox.addEventListener("change", () => {
+          void updateSettings(item.viewType, checkbox.checked);
+        });
+      });
+    });
+    const grid = view.createEl("div", { cls: "lifeplanner-dashboard-grid" });
+    const services = this.buildServices();
+    if (this.plugin.settings.showDashboardCalendar) {
+      const body = this.createSection(grid, "\u6708\u9593\u30AB\u30EC\u30F3\u30C0\u30FC");
+      this.renderMonthlyCalendar(body, /* @__PURE__ */ new Date());
+    }
+    const sectionMap = new Map(
+      DASHBOARD_SECTIONS.map((item) => [item.viewType, item])
+    );
+    const orderedSections = this.plugin.settings.dashboardSections.map((viewType) => sectionMap.get(viewType)).filter((item) => Boolean(item));
+    if (orderedSections.length === 0 && !this.plugin.settings.showDashboardCalendar) {
+      const empty = grid.createEl("div", { cls: "lifeplanner-dashboard-empty" });
+      empty.setText("\u8868\u793A\u3059\u308B\u30BB\u30AF\u30B7\u30E7\u30F3\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      return;
+    }
+    for (const section of orderedSections) {
+      const includeHeader = section.viewType !== WEEKLY_PLAN_VIEW_TYPE;
+      const body = this.createSection(grid, section.label, includeHeader);
+      await this.renderSection(section.viewType, body, services);
+    }
+  }
+  createSection(container, title, includeHeader = true) {
+    const section = container.createEl("section", { cls: "lifeplanner-dashboard-section" });
+    if (includeHeader) {
+      const header = section.createEl("div", { cls: "lifeplanner-dashboard-section-header" });
+      header.createEl("h3", { text: title });
+    }
+    return section.createEl("div", { cls: "lifeplanner-dashboard-section-body" });
+  }
+  async renderSection(viewType, container, services) {
+    switch (viewType) {
+      case INBOX_VIEW_TYPE:
+        await this.renderInboxSection(container, services);
+        return;
+      case WEEKLY_PLAN_VIEW_TYPE:
+        await this.renderWeeklySection(container);
+        return;
+      case GOAL_TASK_VIEW_TYPE:
+        await this.renderActionPlanSection(container, services);
+        return;
+      case ISSUES_VIEW_TYPE:
+        await this.renderIssuesSection(container, services);
+        return;
+      default:
+        container.createEl("div", {
+          text: "\u3053\u306E\u30BB\u30AF\u30B7\u30E7\u30F3\u306F\u30BF\u30D6\u3067\u7BA1\u7406\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+          cls: "lifeplanner-dashboard-placeholder"
+        });
+    }
+  }
+  async renderInboxSection(container, services) {
+    const form = container.createEl("div", { cls: "lifeplanner-inbox-form lifeplanner-form" });
+    const input = form.createEl("input", { type: "text" });
+    input.placeholder = "\u30E1\u30E2\u3092\u5165\u529B";
+    const addButton = form.createEl("button", { text: "\u8FFD\u52A0" });
+    const listEl = container.createEl("div", { cls: "lifeplanner-inbox-list" });
+    const handleAdd = async (content) => {
+      if (!content) {
+        this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+        return;
+      }
+      await services.inboxService.addItem(content);
+      this.setStatus("\u30E1\u30E2\u3092\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+      await renderItems();
+    };
+    const handleGoalTriage = async (item, level) => {
+      await services.inboxTriage.toGoal(item, level);
+      await services.inboxService.deleteItem(item.id);
+      this.setStatus("\u76EE\u6A19\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+      await renderItems();
+    };
+    const handleTaskTriage = async (item, goalTitle) => {
+      await services.inboxTriage.toTask(item, goalTitle);
+      await services.inboxService.deleteItem(item.id);
+      this.setStatus("\u30BF\u30B9\u30AF\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+      await renderItems();
+    };
+    const handleWeeklyTriage = async (item) => {
+      await services.inboxTriage.toWeekly(item);
+      await services.inboxService.deleteItem(item.id);
+      this.setStatus("\u9031\u9593\u8A08\u753B\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+      await renderItems();
+    };
+    const handleIssueTriage = async (item) => {
+      await services.inboxTriage.toIssue(item);
+      await services.inboxService.deleteItem(item.id);
+      this.setStatus("\u30A4\u30B7\u30E5\u30FC\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+      await renderItems();
+    };
+    const handleDelete = async (itemId) => {
+      await services.inboxService.deleteItem(itemId);
+      this.setStatus("\u524A\u9664\u3057\u307E\u3057\u305F");
+      await renderItems();
+    };
+    const renderItems = async () => {
+      listEl.empty();
+      const items = await services.inboxService.listItems();
+      if (items.length === 0) {
+        listEl.createEl("div", { text: "(\u672A\u767B\u9332)" });
+        return;
+      }
+      const sortedItems = [...items].sort(
+        (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
+      );
+      const goals = await services.goalsService.listGoals();
+      const goalTitles = goals.map((goal) => goal.title);
+      const goalLevels = ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"];
+      for (const item of sortedItems) {
+        const row = listEl.createEl("div", { cls: "lifeplanner-inbox-row" });
+        const meta = row.createEl("div", { cls: "lifeplanner-inbox-meta" });
+        meta.createEl("span", {
+          cls: "lifeplanner-inbox-timestamp",
+          text: this.formatTimestamp(item.createdAt)
+        });
+        const destLabel = this.formatDestination(item.destination);
+        if (destLabel) {
+          meta.createEl("span", { cls: "lifeplanner-inbox-destination", text: destLabel });
+        }
+        const inputRow = row.createEl("div", { cls: "lifeplanner-inbox-input-row" });
+        const rowInput = inputRow.createEl("input", {
+          type: "text",
+          cls: "lifeplanner-inbox-input"
+        });
+        rowInput.placeholder = "\u30E1\u30E2";
+        rowInput.value = item.content;
+        let lastSaved = item.content;
+        rowInput.addEventListener("input", () => {
+          const nextValue = rowInput.value.trim();
+          if (!nextValue || nextValue === lastSaved) {
+            return;
+          }
+          lastSaved = nextValue;
+          void services.inboxService.updateItem(item.id, nextValue).then(() => {
+            this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+          });
+        });
+        rowInput.addEventListener("blur", () => {
+          if (rowInput.value.trim().length === 0) {
+            rowInput.value = lastSaved;
+            this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+          }
+        });
+        const menuHost = inputRow.createEl("div", { cls: "lifeplanner-inbox-menu" });
+        const resolveContent = () => {
+          const content = rowInput.value.trim();
+          if (!content) {
+            rowInput.value = lastSaved;
+            this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+            rowInput.focus();
+            return null;
+          }
+          if (content !== item.content) {
+            return { ...item, content };
+          }
+          return item;
+        };
+        const panels = row.createEl("div", { cls: "lifeplanner-inbox-panels" });
+        const goalPanel = panels.createEl("div", {
+          cls: "lifeplanner-inbox-panel lifeplanner-hidden"
+        });
+        goalPanel.createEl("span", { cls: "lifeplanner-inbox-panel-label", text: "\u30B9\u30D1\u30F3" });
+        const goalSelect = goalPanel.createEl("select");
+        goalLevels.forEach((level) => {
+          goalSelect.createEl("option", { text: level, value: level });
+        });
+        goalSelect.value = "\u9031\u9593";
+        const goalConfirm = goalPanel.createEl("button", { text: "\u8FFD\u52A0" });
+        const taskPanel = panels.createEl("div", {
+          cls: "lifeplanner-inbox-panel lifeplanner-hidden"
+        });
+        taskPanel.createEl("span", { cls: "lifeplanner-inbox-panel-label", text: "\u76EE\u6A19" });
+        const taskSelect = taskPanel.createEl("select");
+        if (goalTitles.length > 0) {
+          const placeholder = taskSelect.createEl("option", { text: "\u76EE\u6A19\u3092\u9078\u629E", value: "" });
+          placeholder.disabled = true;
+          placeholder.selected = true;
+          goalTitles.forEach((title) => {
+            taskSelect.createEl("option", { text: title, value: title });
+          });
+        } else {
+          taskSelect.createEl("option", { text: "\u9031\u9593", value: "\u9031\u9593" });
+          taskSelect.value = "\u9031\u9593";
+        }
+        const taskConfirm = taskPanel.createEl("button", { text: "\u8FFD\u52A0" });
+        const togglePanel = (panel) => {
+          const show = panel.classList.contains("lifeplanner-hidden");
+          goalPanel.classList.add("lifeplanner-hidden");
+          taskPanel.classList.add("lifeplanner-hidden");
+          if (show) {
+            panel.classList.remove("lifeplanner-hidden");
+          }
+        };
+        goalConfirm.addEventListener("click", () => {
+          const current = resolveContent();
+          if (!current) {
+            return;
+          }
+          void handleGoalTriage(current, goalSelect.value);
+          goalPanel.classList.add("lifeplanner-hidden");
+        });
+        taskConfirm.addEventListener("click", () => {
+          const current = resolveContent();
+          if (!current) {
+            return;
+          }
+          if (!taskSelect.value) {
+            this.setStatus("\u76EE\u6A19\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044");
+            return;
+          }
+          void handleTaskTriage(current, taskSelect.value);
+          taskPanel.classList.add("lifeplanner-hidden");
+        });
+        attachRowMenu(menuHost, this.contentEl, [
+          {
+            label: "\u76EE\u6A19\u3078",
+            onSelect: () => togglePanel(goalPanel)
+          },
+          {
+            label: "\u30BF\u30B9\u30AF\u3078",
+            onSelect: () => togglePanel(taskPanel)
+          },
+          {
+            label: "\u9031\u9593\u3078",
+            onSelect: () => {
+              const current = resolveContent();
+              if (!current) {
+                return;
+              }
+              void handleWeeklyTriage(current);
+              goalPanel.classList.add("lifeplanner-hidden");
+              taskPanel.classList.add("lifeplanner-hidden");
+            }
+          },
+          {
+            label: "\u30A4\u30B7\u30E5\u30FC\u3078",
+            onSelect: () => {
+              const current = resolveContent();
+              if (!current) {
+                return;
+              }
+              void handleIssueTriage(current);
+              goalPanel.classList.add("lifeplanner-hidden");
+              taskPanel.classList.add("lifeplanner-hidden");
+            }
+          },
+          {
+            label: "\u524A\u9664",
+            onSelect: () => {
+              void handleDelete(item.id);
+            }
+          }
+        ]);
+      }
+    };
+    addButton.addEventListener("click", () => {
+      void handleAdd(input.value.trim());
+      input.value = "";
+    });
+    await renderItems();
+  }
+  async renderWeeklySection(container) {
+    if (!this.embeddedWeekly) {
+      this.embeddedWeekly = new WeeklyPlanRenderer(this.plugin);
+    }
+    await this.embeddedWeekly.render(container, {
+      showNavigation: false,
+      showHeader: true,
+      attachMenuClose: false
+    });
+  }
+  async renderActionPlanSection(container, services) {
+    const tasks = await services.tasksService.listTasks();
+    const list = container.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list"
+    });
+    const hiddenWrap = container.createEl("div", { cls: "lifeplanner-action-plan-hidden" });
+    const hiddenHeader = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-action-plan-hidden-header"
+    });
+    const hiddenToggle = hiddenHeader.createEl("button", { text: "\u975E\u8868\u793A\u30EA\u30B9\u30C8" });
+    const hiddenList = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list is-hidden"
+    });
+    let hiddenOpen = false;
+    const setHiddenOpen = (open) => {
+      hiddenOpen = open;
+      hiddenList.classList.toggle("is-hidden", !hiddenOpen);
+    };
+    const updateHiddenCount = () => {
+      const count = hiddenList.querySelectorAll(".lifeplanner-weekly-list-row").length;
+      hiddenToggle.setText(`\u975E\u8868\u793A\u30EA\u30B9\u30C8 (${count})`);
+      hiddenWrap.classList.toggle("is-empty", count === 0);
+      if (count === 0) {
+        setHiddenOpen(false);
+      }
+    };
+    const moveRow = (row, done) => {
+      const target = done ? hiddenList : list;
+      if (row.parentElement !== target) {
+        target.appendChild(row);
+      }
+      updateHiddenCount();
+    };
+    hiddenToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      setHiddenOpen(!hiddenOpen);
+    });
+    if (tasks.length === 0) {
+      list.createEl("div", { text: "(\u672A\u767B\u9332)" });
+      updateHiddenCount();
+      return;
+    }
+    tasks.forEach((task) => {
+      const row = list.createEl("div", { cls: "lifeplanner-weekly-list-row" });
+      const label = row.createEl("span", {
+        text: `${task.goalId ? `[${task.goalId}] ` : ""}${task.title}`
+      });
+      label.classList.add("lifeplanner-action-plan-label");
+      const checkbox = row.createEl("input", { type: "checkbox" });
+      checkbox.checked = task.status === "done";
+      if (checkbox.checked) {
+        moveRow(row, true);
+      }
+      checkbox.addEventListener("change", () => {
+        task.status = checkbox.checked ? "done" : "todo";
+        moveRow(row, checkbox.checked);
+        void services.tasksService.saveTasks(tasks).then(() => {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        });
+      });
+    });
+    updateHiddenCount();
+  }
+  async renderIssuesSection(container, services) {
+    const board = container.createEl("div", { cls: "lifeplanner-kanban" });
+    const columns = this.plugin.settings.kanbanColumns.length ? this.plugin.settings.kanbanColumns : ["Backlog"];
+    const issues = await services.issuesService.listIssues();
+    const grouped = {};
+    columns.forEach((column) => {
+      grouped[column] = [];
+    });
+    issues.forEach((issue) => {
+      const status = grouped[issue.status] ? issue.status : columns[0];
+      if (!grouped[status]) {
+        grouped[status] = [];
+      }
+      grouped[status].push(issue.title || "(\u7121\u984C)");
+    });
+    columns.forEach((column) => {
+      const columnEl = board.createEl("div", { cls: "lifeplanner-kanban-column" });
+      const header = columnEl.createEl("div", { cls: "lifeplanner-kanban-header" });
+      const count = grouped[column]?.length ?? 0;
+      header.createEl("h3", { text: `${column} (${count})` });
+      const list = columnEl.createEl("div", { cls: "lifeplanner-kanban-list" });
+      const titles = grouped[column] ?? [];
+      if (titles.length === 0) {
+        list.createEl("div", { text: "(\u7A7A)", cls: "lifeplanner-kanban-empty" });
+        return;
+      }
+      titles.slice(0, 5).forEach((title) => {
+        const card = list.createEl("div", { cls: "lifeplanner-kanban-card" });
+        card.createEl("div", { text: title });
+      });
+      if (titles.length > 5) {
+        list.createEl("div", {
+          text: `\u4ED6 ${titles.length - 5} \u4EF6`,
+          cls: "lifeplanner-kanban-empty"
+        });
+      }
+    });
+  }
+  renderMonthlyCalendar(container, date) {
+    const weekStart = this.computeWeekStart(date);
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startIndex = this.plugin.settings.weekStart === "sunday" ? firstDay.getDay() : (firstDay.getDay() + 6) % 7;
+    const dayLabels = this.plugin.settings.weekStart === "sunday" ? ["\u65E5", "\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"] : ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
+    const weekStartDate = new Date(year, month, weekStart.getDate());
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 6);
+    const today = /* @__PURE__ */ new Date();
+    const calendar = container.createEl("div", { cls: "lifeplanner-monthly-calendar" });
+    calendar.createEl("div", {
+      cls: "lifeplanner-monthly-title",
+      text: `${year}\u5E74${month + 1}\u6708`
+    });
+    const grid = calendar.createEl("div", { cls: "lifeplanner-monthly-grid" });
+    dayLabels.forEach((label) => {
+      grid.createEl("div", {
+        cls: "lifeplanner-monthly-cell is-header",
+        text: label
+      });
+    });
+    for (let i = 0; i < startIndex; i += 1) {
+      grid.createEl("div", { cls: "lifeplanner-monthly-cell is-empty" });
+    }
+    for (let day = 1; day <= lastDay.getDate(); day += 1) {
+      const current = new Date(year, month, day);
+      const cell = grid.createEl("div", {
+        cls: "lifeplanner-monthly-cell",
+        text: `${day}`
+      });
+      if (current >= weekStartDate && current <= weekEndDate) {
+        cell.classList.add("is-in-week");
+      }
+      if (this.isSameDay(current, today)) {
+        cell.classList.add("is-today");
+      }
+    }
+  }
+  computeWeekStart(today) {
+    const base = new Date(today);
+    const day = base.getDay();
+    const startIndex = this.plugin.settings.weekStart === "sunday" ? 0 : 1;
+    const diff = (day - startIndex + 7) % 7;
+    const start = new Date(base);
+    start.setDate(base.getDate() - diff);
+    return start;
+  }
+  isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+  formatTimestamp(value) {
+    if (!value) {
+      return "\u65E5\u6642\u672A\u8A2D\u5B9A";
+    }
+    const date = new Date(value);
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    const hours = `${date.getHours()}`.padStart(2, "0");
+    const minutes = `${date.getMinutes()}`.padStart(2, "0");
+    return `${year}/${month}/${day} ${hours}:${minutes}`;
+  }
+  formatDestination(destination) {
+    switch (destination) {
+      case "goal":
+        return "\u632F\u308A\u5206\u3051: \u76EE\u6A19";
+      case "task":
+        return "\u632F\u308A\u5206\u3051: \u30BF\u30B9\u30AF";
+      case "weekly":
+        return "\u632F\u308A\u5206\u3051: \u9031\u9593";
+      case "issue":
+        return "\u632F\u308A\u5206\u3051: \u30A4\u30B7\u30E5\u30FC";
+      default:
+        return "";
+    }
+  }
+  setStatus(message) {
+    if (!this.statusEl) {
+      return;
+    }
+    this.statusEl.setText(message);
+    window.setTimeout(() => {
+      this.statusEl?.setText("");
+    }, 2e3);
+  }
+};
+
+// src/ui/exercises_view.ts
+var import_obsidian4 = require("obsidian");
+
+// src/services/exercises_service.ts
+var ExercisesService = class {
+  constructor(repository, baseDir, defaultTags) {
+    this.repository = repository;
+    this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
+  }
+  async loadSections(sectionDefs) {
+    const resolved = resolveLifePlannerPath("Exercises", this.baseDir);
+    const content = await this.repository.read(resolved);
+    if (!content) {
+      const seed = serializeSections(sectionDefs, {}, this.defaultTags);
+      await this.repository.write(resolved, seed);
+      return buildSectionMap(sectionDefs, {});
+    }
+    const parsed = parseSections(content);
+    const normalized = normalizeSections(sectionDefs, parsed);
+    return buildSectionMap(sectionDefs, normalized);
+  }
+  async saveSections(sectionDefs, sections) {
+    const content = serializeSections(sectionDefs, sections, this.defaultTags);
+    await this.repository.write(resolveLifePlannerPath("Exercises", this.baseDir), content);
+  }
+};
+function parseSections(content) {
+  const sections = {};
+  const lines = content.split("\n");
+  let currentTitle = "";
+  let body = [];
+  const flush = () => {
+    if (!currentTitle) {
+      return;
+    }
+    sections[currentTitle] = body.join("\n").trim();
+  };
+  for (const line of lines) {
+    const headingMatch = line.match(/^##\s+(.+)$/);
+    if (headingMatch) {
+      flush();
+      currentTitle = headingMatch[1].trim();
+      body = [];
+      continue;
+    }
+    if (!currentTitle) {
+      continue;
+    }
+    body.push(line);
+  }
+  flush();
+  return sections;
+}
+function serializeSections(sectionDefs, sections, defaultTags = []) {
+  const lines = [];
+  lines.push("# Exercises");
+  lines.push("");
+  for (const section of sectionDefs) {
+    const body = sections[section.title] ?? section.defaultBody;
+    lines.push(`## ${section.title}`);
+    lines.push("");
+    if (body && body.trim().length > 0) {
+      lines.push(body.trim());
+    } else {
+      lines.push("- ");
+    }
+    lines.push("");
+  }
+  return prependTagFrontmatter(lines, defaultTags).join("\n");
+}
+function buildSectionMap(sectionDefs, parsed) {
+  const result = {};
+  for (const section of sectionDefs) {
+    result[section.title] = parsed[section.title] ?? section.defaultBody;
+  }
+  return result;
+}
+function normalizeSections(sectionDefs, parsed) {
+  const normalized = { ...parsed };
+  for (const section of sectionDefs) {
+    if (!section.questions || section.questions.length === 0) {
+      continue;
+    }
+    const raw = normalized[section.title];
+    if (!raw) {
+      continue;
+    }
+    const lines = raw.split("\n").map((line) => line.trim());
+    const filtered = lines.filter((line) => !section.questions?.includes(line));
+    normalized[section.title] = filtered.join("\n").trim();
+  }
+  return normalized;
+}
+
+// src/services/table_section_service.ts
+var TableSectionService = class {
+  constructor(repository, type, title, columns, baseDir, defaultTags) {
+    this.repository = repository;
+    this.type = type;
+    this.title = title;
+    this.columns = columns;
+    this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
+  }
+  async loadRows() {
+    const content = await this.repository.read(resolveLifePlannerPath(this.type, this.baseDir));
+    if (!content) {
+      const seed = this.serializeRows([]);
+      await this.repository.write(resolveLifePlannerPath(this.type, this.baseDir), seed);
+      return [];
+    }
+    return parseTable(content);
+  }
+  async saveRows(rows) {
+    const content = this.serializeRows(rows);
+    await this.repository.write(resolveLifePlannerPath(this.type, this.baseDir), content);
+  }
+  serializeRows(rows) {
+    const lines = [];
+    lines.push(`# ${this.title}`);
+    lines.push("");
+    const headers = this.columns.map((col) => col.label);
+    lines.push(`| ${headers.join(" | ")} |`);
+    lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+    if (rows.length === 0) {
+      lines.push(`| ${headers.map(() => "").join(" | ")} |`);
+    } else {
+      rows.forEach((row) => {
+        const cells = headers.map((_, index) => row[index] ?? "");
+        lines.push(`| ${cells.join(" | ")} |`);
+      });
+    }
+    lines.push("");
+    return prependTagFrontmatter(lines, this.defaultTags).join("\n");
+  }
+};
+function parseTable(content) {
+  const lines = content.split("\n");
+  const tableLines = lines.filter((line) => line.trim().startsWith("|"));
+  if (tableLines.length < 2) {
+    return [];
+  }
+  const dataLines = tableLines.slice(2);
+  const rows = [];
+  for (const line of dataLines) {
+    const cells = line.split("|").map((cell) => cell.trim()).filter((_, index, arr) => index !== 0 && index !== arr.length - 1);
+    if (cells.length === 0) {
+      continue;
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
+// src/ui/exercises_view.ts
+var EXERCISE_SECTIONS = [
+  {
+    title: "\u4FA1\u5024\u89B3\u5206\u6790",
+    defaultBody: "",
+    questions: [
+      "\u3042\u306A\u305F\u306F\u306A\u305C\u4ECA\u306E\u4F1A\u793E(\u5B66\u6821)\u306B\u5165\u308A\u307E\u3057\u305F\u304B\uFF1F",
+      "\u3042\u306A\u305F\u306F\u306A\u305C\u4ECA\u306E\u8DA3\u5473\u3092\u59CB\u3081\u305F\u306E\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u306F\u306A\u305C\u3053\u306E\u5834\u6240\u306B\u4F4F\u3093\u3067\u308B\u306E\u3067\u3059\u304B\uFF1F",
+      "\u3053\u308C\u307E\u3067\u306B\u4F1A\u3063\u305F\u4EBA\u3067\u3001\u305C\u3072\u3082\u3046\u4E00\u5EA6\u4F1A\u3044\u305F\u3044\u3068\u601D\u3046\u4EBA\u306F\uFF1F",
+      "\u3042\u306A\u305F\u304C\u4E00\u756A\u597D\u304D\u306A\u8A00\u8449\u306F\uFF1F",
+      "\u3042\u306A\u305F\u304C\u3053\u308C\u307E\u3067\u306B\u8AAD\u3093\u3060\u4E00\u756A\u597D\u304D\u306A\u672C\u306F\uFF1F",
+      "\u3053\u308C\u307E\u3067\u306E\u4ED5\u4E8B\u3067\u4E00\u756A\u5145\u5B9F\u3057\u3066\u3044\u305F\u3053\u3068\u306F\uFF1F\u3044\u3064\uFF1F\u3069\u3093\u306A\u4ED5\u4E8B\uFF1F\u306A\u305C\uFF1F",
+      "\u5BB6\u65CF\u3068\u306E\u601D\u3044\u51FA\u3067\u4E00\u756A\u697D\u3057\u304B\u3063\u305F\u3053\u3068\u306F\uFF1F\u3044\u3064\uFF1F\u3069\u3093\u306A\u5185\u5BB9\uFF1F\u306A\u305C\uFF1F",
+      "\u4EBA\u3068\u63A5\u3059\u308B\u4E0A\u3067\u4F55\u304C\u4E00\u756A\u5927\u5207\u3067\u3059\u304B\uFF1F",
+      "\u5931\u3046\u3068\u6C17\u529B\u304C\u306A\u304F\u306A\u308B\u3082\u306E\u306F\u306A\u3093\u3067\u3059\u304B\uFF1F",
+      "\u4ECA\u5F8C\u306E\u4EBA\u751F\u306B\u304A\u3044\u3066\u6700\u3082\u8EAB\u306B\u3064\u3051\u305F\u3044\u624D\u80FD\u3084\u80FD\u529B\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u304C\u3053\u308C\u307E\u3067\u6700\u3082\u308F\u304F\u308F\u304F\u3057\u305F\u3053\u3068\u306F\u3069\u306E\u3088\u3046\u306A\u3053\u3068\u3067\u3057\u305F\u304B\uFF1F",
+      "\u3042\u306A\u305F\u304C\u5FC3\u306E\u305D\u3053\u304B\u3089\u300C\u30EA\u30E9\u30C3\u30AF\u30B9\u300D\u3067\u304D\u308B\u6642\u9593\u306F\u3069\u306E\u3088\u3046\u306A\u6642\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u306E\u7406\u60F3\u3068\u3059\u308B\u4EBA\u306F\u3001\u4F55\u3092\u3082\u3063\u3068\u3082\u5927\u4E8B\u306B\u3057\u3066\u3044\u308B\u306E\u3067\u3057\u3087\u3046\u304B\uFF1F",
+      "\u4EBA\u751F\u306E\u4E2D\u3067\u5B66\u3076\u3053\u3068\u306E\u591A\u304B\u3063\u305F\u5931\u6557\u3001\u632B\u6298\u4F53\u9A13\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u4ED5\u4E8B\u3068\u30D7\u30E9\u30A4\u30D9\u30FC\u30C8\u3067\u5171\u901A\u3057\u3066\u8A00\u3048\u308B\u6307\u91DD\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u306E\u4EBA\u751F\u306E\u4E2D\u3067\u3001\u5145\u5B9F\u611F\u306E\u9AD8\u304B\u3063\u305F\u6210\u529F\u4F53\u9A13\u306F\u306A\u3093\u3067\u3057\u305F\u304B\uFF1F",
+      "\u6BCE\u65E5\u306E\u751F\u6D3B\u3067\u6C17\u3092\u3064\u3051\u3066\u3044\u308B\u3053\u3068\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u79C1\u751F\u6D3B\u3067\u6700\u3082\u4FA1\u5024\u304C\u3042\u308B\u3068\u8003\u3048\u308B\u884C\u52D5\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u4ECA\u3001\u5341\u5206\u306A\u6642\u9593\u304C\u3042\u308C\u3070\u8AB0\u3068\u4F55\u3092\u3057\u305F\u3044\u3067\u3059\u304B\uFF1F",
+      "\u3053\u308C\u304B\u3089\u306E\u4EBA\u751F\u3067\u4E00\u756A\u5B9F\u73FE\u3057\u305F\u3044\u3053\u3068\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u306E\u7406\u60F3\u3068\u3059\u308B\u4EBA\u751F\u306F\u3069\u306E\u3088\u3046\u306A\u3053\u3068\u3092\u3057\u3066\u6210\u3057\u9042\u3052\u305F\u4EBA\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u306E\u4EBA\u751F\u306E\u4E2D\u3067\u5927\u304D\u306A\u5F71\u97FF\u3092\u53D7\u3051\u305F\u4EBA\u306F\u3069\u3093\u306A\u70B9\u304C\u6700\u3082\u512A\u308C\u3066\u3044\u307E\u3057\u305F\u304B\uFF1F"
+    ],
+    layout: "vertical"
+  },
+  {
+    kind: "list",
+    title: "\u4F59\u547D1\u5E74\u30EA\u30B9\u30C8",
+    defaultBody: "",
+    legacyQuestions: ["\u300C\u4F59\u547D1\u5E74\u300D\u3060\u3063\u305F\u3089\u4F55\u3092\u3057\u305F\u3044\uFF1F"]
+  },
+  {
+    kind: "list",
+    title: "\u3042\u3068100\u5E74\u4EBA\u751F\u30EA\u30B9\u30C8",
+    defaultBody: "",
+    legacyQuestions: ["\u5065\u5EB7\u4F53\u3067\u3042\u3068100\u5E74\u751F\u304D\u3089\u308C\u308B\u3068\u3057\u305F\u3089\u4F55\u3092\u3057\u305F\u3044\uFF1F"]
+  },
+  {
+    kind: "list",
+    title: "\u6B7B\u306C\u307E\u3067\u306B\u3084\u308A\u305F\u3044\u3053\u3068",
+    defaultBody: "",
+    legacyQuestions: ["\u4F55\u3092\u3057\u305F\u3044\uFF1F"]
+  },
+  {
+    title: "\u7ACB\u5834\u3092\u5909\u3048\u3066\u8003\u3048\u308B",
+    defaultBody: "",
+    questions: [
+      "\u8AB0\u306E\u7ACB\u5834\u3067\u8003\u3048\u307E\u3059\u304B\uFF1F",
+      "\u305D\u306E\u4EBA\u306F\u3042\u306A\u305F\u306B\u5BFE\u3057\u3066\u4F55\u3092\u671B\u3093\u3067\u307E\u3059\u304B\uFF1F\u4F55\u3092\u3044\u3084\u3060\u3068\u601D\u3063\u3066\u307E\u3059\u304B\uFF1F",
+      "\u671B\u307E\u308C\u3066\u3044\u308B\u3053\u3068\u3092\u5B9F\u73FE\u3059\u308B\u306B\u306F\u3069\u3046\u3057\u305F\u3089\u826F\u3044\u3067\u3059\u304B\uFF1F"
+    ],
+    layout: "vertical"
+  },
+  {
+    title: "\u61A7\u308C\u306E\u4EBA\u7269",
+    defaultBody: "",
+    questions: ["\u8AB0\u306E\uFF1F\u3069\u3093\u306A\u3068\u3053\u308D\uFF1F"],
+    layout: "vertical"
+  },
+  {
+    title: "20\u5E74\u5F8C\u306E\u81EA\u5206\u3078\u30A4\u30F3\u30BF\u30D3\u30E5\u30FC",
+    defaultBody: "",
+    questions: [
+      "\u8AB0\u3068\u4E00\u7DD2\u3067\u3057\u305F\u304B\uFF1F",
+      "\u3069\u306E\u3088\u3046\u306A\u8ECA\u306B\u4E57\u308A\u3001\u3069\u3093\u306A\u8EAB\u306A\u308A\u3067\u3057\u305F\u304B\uFF1F",
+      "\u4ECA\u73FE\u5728\u3069\u3093\u306A\u4ED5\u4E8B\u3092\u3057\u3066\u3044\u308B\u3088\u3046\u3067\u3057\u305F\u304B\uFF1F",
+      "\u3069\u3093\u306A\u6240\u306B\u4F4F\u3093\u3067\u3044\u305D\u3046\u3067\u3057\u305F\u304B\uFF1F",
+      "\u3042\u306A\u305F\u304C\u4ECA\u4E00\u756A\u5927\u5207\u306A\u3082\u306E\u306F\u4F55\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u304C\u305D\u306E\u3088\u3046\u306A\u6210\u529F\u3092\u53CE\u3081\u305F\u306E\u306F\u3069\u3046\u3057\u3066\u3067\u3057\u3087\u3046\u304B\uFF1F",
+      "\u305D\u306E\u3088\u3046\u306B\u904B\u306B\u3082\u6075\u307E\u308C\u308B\u306B\u306F\u3001\u3042\u306A\u305F\u304C\u4F55\u3092\u3057\u3066\u304D\u305F\u304B\u3089\u3067\u3059\u304B\uFF1F",
+      "\u4ECA\u601D\u3048\u3070\u4F55\u304C\u8EE2\u6A5F\u3067\u3057\u305F\u304B\uFF1F\u305D\u3053\u3067\u3069\u3093\u306A\u5224\u65AD\u3092\u3057\u305F\u306E\u3067\u3059\u304B\uFF1F",
+      "\u4ECA\u3001\u4F55\u3092\u3057\u3066\u3044\u308B\u3068\u304D\u304C\u4E00\u756A\u697D\u3057\u3044\u3067\u3059\u304B\uFF1F",
+      "\u3042\u306A\u305F\u3092\u4E00\u756A\u652F\u3048\u3066\u304F\u308C\u305F\u4EBA\u306F\u8AB0\u3067\u3057\u305F\u304B\uFF1F"
+    ],
+    layout: "vertical"
+  },
+  {
+    kind: "table",
+    title: "\u5FC3\u306B\u6B8B\u3063\u305F\u8A00\u8449\u30FB\u5EA7\u53F3\u306E\u9298",
+    tableType: "Quotes",
+    columns: [
+      {
+        label: "\u7A2E\u5225",
+        type: "select",
+        options: ["\u5FC3\u306B\u6B8B\u3063\u305F\u8A00\u8449", "\u5EA7\u53F3\u306E\u9298"],
+        width: "160px"
+      },
+      { label: "\u5185\u5BB9", type: "text", width: "minmax(260px, 1fr)" }
+    ]
+  }
+];
+var ExercisesView = class extends import_obsidian4.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
+    this.activeSectionTitle = EXERCISE_SECTIONS[0]?.title ?? "";
+    this.disposeMenuClose = null;
+    this.plugin = plugin;
+    this.exercisesService = new ExercisesService(
+      new MarkdownRepository(this.plugin.app),
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+  }
+  getViewType() {
+    return EXERCISES_VIEW_TYPE;
+  }
+  getDisplayText() {
+    return "\u6F14\u7FD2";
+  }
+  async onOpen() {
+    const container = this.contentEl;
+    container.empty();
+    const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
+    view.createEl("h2", { text: "\u6F14\u7FD2" });
+    renderNavigation(view, EXERCISES_VIEW_TYPE, (viewType) => {
+      void this.plugin.openViewInLeaf(viewType, this.leaf);
+    }, this.plugin.settings.hiddenTabs);
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
+    this.listEl = view.createEl("div", { cls: "lifeplanner-exercises-list" });
+    this.disposeMenuClose = registerRowMenuClose(view);
+    await this.renderExercises();
+  }
+  async onClose() {
+    this.listEl = null;
+    this.statusEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
+  }
+  async renderExercises() {
+    if (!this.listEl) {
+      return;
+    }
+    this.listEl.empty();
+    const contentSections = EXERCISE_SECTIONS.filter(
+      (section) => section.kind !== "table"
+    );
+    const contentSectionDefs = contentSections.map((section) => ({
+      title: section.title,
+      defaultBody: section.defaultBody,
+      questions: section.kind === "questions" ? section.questions : section.kind === "list" ? section.legacyQuestions : section.questions
+    }));
+    const sections = await this.exercisesService.loadSections(contentSectionDefs);
+    const tabs = this.listEl.createEl("div", { cls: "lifeplanner-exercises-tabs" });
+    const content = this.listEl.createEl("div", { cls: "lifeplanner-exercises-content" });
+    const renderSection = async (sectionDef) => {
+      content.empty();
+      const section = content.createEl("div", { cls: "lifeplanner-exercises-item" });
+      if (sectionDef.kind === "table") {
+        section.createEl("h3", { text: sectionDef.title });
+        await this.renderTableSection(section, sectionDef);
+        return;
+      }
+      if (sectionDef.kind === "list") {
+        this.renderListSection(section, sectionDef, sections, contentSectionDefs);
+        return;
+      }
+      section.createEl("h3", { text: sectionDef.title });
+      if (sectionDef.questions && sectionDef.questions.length > 0) {
+        const savedLines = (sections[sectionDef.title] ?? "").split("\n").map((line) => line.trim());
+        const answerMap = /* @__PURE__ */ new Map();
+        savedLines.forEach((line) => {
+          if (!line.startsWith("- ")) {
+            return;
+          }
+          const content2 = line.replace(/^\-\s*/, "");
+          const parts = content2.split(":");
+          if (parts.length < 2) {
+            return;
+          }
+          const key = parts[0].trim();
+          const value = parts.slice(1).join(":").trim();
+          if (key) {
+            answerMap.set(key, value);
+          }
+        });
+        const grid = section.createEl("div", {
+          cls: sectionDef.layout === "vertical" ? "lifeplanner-exercises-grid is-vertical" : "lifeplanner-exercises-grid"
+        });
+        sectionDef.questions.forEach((question) => {
+          grid.createEl("div", { cls: "lifeplanner-exercises-question", text: question });
+          const input = grid.createEl("textarea", { cls: "lifeplanner-exercises-answer" });
+          input.rows = 3;
+          input.value = answerMap.get(question) ?? "";
+          input.addEventListener("input", () => {
+            answerMap.set(question, input.value.trim());
+            const lines = [];
+            sectionDef.questions?.forEach((q) => {
+              const value = answerMap.get(q) ?? "";
+              lines.push(`- ${q}: ${value}`);
+            });
+            sections[sectionDef.title] = lines.join("\n");
+            void this.exercisesService.saveSections(contentSectionDefs, sections);
+            this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+          });
+        });
+      } else {
+        const textarea = section.createEl("textarea");
+        textarea.rows = 6;
+        textarea.value = sections[sectionDef.title] ?? "";
+        textarea.placeholder = "\u56DE\u7B54\u3092\u8A18\u5165";
+        textarea.addEventListener("input", () => {
+          sections[sectionDef.title] = textarea.value;
+          void this.exercisesService.saveSections(contentSectionDefs, sections);
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        });
+      }
+    };
+    EXERCISE_SECTIONS.forEach((sectionDef) => {
+      const tab = tabs.createEl("button", {
+        text: sectionDef.title,
+        cls: sectionDef.title === this.activeSectionTitle ? "lifeplanner-exercises-tab is-active" : "lifeplanner-exercises-tab"
+      });
+      tab.setAttr("type", "button");
+      tab.addEventListener("click", () => {
+        this.activeSectionTitle = sectionDef.title;
+        tabs.querySelectorAll(".lifeplanner-exercises-tab").forEach((btn) => {
+          btn.classList.remove("is-active");
+        });
+        tab.classList.add("is-active");
+        void renderSection(sectionDef);
+      });
+    });
+    const initial = EXERCISE_SECTIONS.find((sectionDef) => sectionDef.title === this.activeSectionTitle) ?? EXERCISE_SECTIONS[0];
+    if (initial) {
+      await renderSection(initial);
+    }
+  }
+  async renderTableSection(container, sectionDef) {
+    const service = new TableSectionService(
+      new MarkdownRepository(this.plugin.app),
+      sectionDef.tableType,
+      sectionDef.title,
+      sectionDef.columns,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
+    const actions = container.createEl("div", { cls: "lifeplanner-table-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const table = container.createEl("div", { cls: "lifeplanner-table-grid" });
+    table.dataset.sectionType = sectionDef.tableType;
+    table.style.gridTemplateColumns = sectionDef.columns.map((column) => {
+      if (column.width) {
+        return column.width;
+      }
+      if (column.type === "checkbox") {
+        return "60px";
+      }
+      if (column.type === "select") {
+        return "120px";
+      }
+      return "minmax(160px, 1fr)";
+    }).join(" ");
+    const rows = await service.loadRows();
+    if (rows.length === 0) {
+      rows.push([]);
+    }
+    sectionDef.columns.forEach((column) => {
+      table.createEl("div", {
+        cls: "lifeplanner-table-cell lifeplanner-table-header",
+        text: column.label
+      });
+    });
+    const setCell = (rowIndex, colIndex, value) => {
+      const row = rows[rowIndex] ?? [];
+      row[colIndex] = value;
+      rows[rowIndex] = row;
+      void service.saveRows(rows);
+      this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+    };
+    rows.forEach((row, rowIndex) => {
+      sectionDef.columns.forEach((column, colIndex) => {
+        const cell = table.createEl("div", { cls: "lifeplanner-table-cell" });
+        const value = row[colIndex] ?? "";
+        if (column.type === "select") {
+          const select = cell.createEl("select");
+          (column.options ?? []).forEach((option) => {
+            select.createEl("option", { text: option, value: option });
+          });
+          if (!value && column.options && column.options.length > 0) {
+            select.value = column.options[0];
+          } else {
+            select.value = value;
+          }
+          select.addEventListener("change", () => {
+            setCell(rowIndex, colIndex, select.value);
+          });
+        } else if (column.type === "checkbox") {
+          const checkbox = cell.createEl("input", { type: "checkbox" });
+          checkbox.checked = value === "x";
+          checkbox.addEventListener("change", () => {
+            setCell(rowIndex, colIndex, checkbox.checked ? "x" : "");
+          });
+        } else {
+          const input = cell.createEl("input", { type: "text" });
+          input.value = value;
+          input.addEventListener("input", () => {
+            setCell(rowIndex, colIndex, input.value);
+          });
+        }
+      });
+    });
+    addButton.addEventListener("click", () => {
+      rows.push([]);
+      void service.saveRows(rows);
+      void this.renderExercises();
+    });
+  }
+  renderListSection(container, sectionDef, sections, sectionDefs) {
+    const rawBody = sections[sectionDef.title] ?? "";
+    const parsed = this.parseListItems(rawBody, sectionDef.legacyQuestions ?? []);
+    const items = parsed.items.length > 0 ? [...parsed.items] : [""];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: sectionDef.title });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-list-items" });
+    const persist = (showStatus) => {
+      sections[sectionDef.title] = this.buildListBody(items);
+      void this.exercisesService.saveSections(sectionDefs, sections).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((value, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-list-row" });
+        const input = row.createEl("textarea", { cls: "lifeplanner-exercises-list-input" });
+        input.rows = 1;
+        input.value = value;
+        this.autoResizeTextarea(input);
+        input.addEventListener("input", () => {
+          items[index] = input.value;
+          this.autoResizeTextarea(input);
+          persist(true);
+        });
+        const menuScope = this.listEl ?? container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push("");
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push("");
+      renderRows();
+    });
+    renderRows();
+    if (parsed.usedLegacy) {
+      persist(false);
+    }
+  }
+  parseListItems(rawBody, legacyQuestions) {
+    const items = [];
+    let usedLegacy = false;
+    const lines = rawBody.split("\n");
+    for (const line of lines) {
+      let value = line.trim();
+      if (!value || value === "-") {
+        continue;
+      }
+      if (value.startsWith("- ")) {
+        value = value.slice(2).trim();
+      }
+      if (!value || value === "-") {
+        continue;
+      }
+      const legacyQuestion = legacyQuestions.find((question) => value.startsWith(`${question}:`));
+      if (legacyQuestion) {
+        usedLegacy = true;
+        const extracted = value.slice(legacyQuestion.length + 1).trim();
+        if (extracted) {
+          items.push(extracted);
+        }
+        continue;
+      }
+      if (legacyQuestions.includes(value)) {
+        usedLegacy = true;
+        continue;
+      }
+      items.push(value);
+    }
+    return { items, usedLegacy };
+  }
+  buildListBody(items) {
+    const cleaned = items.map((item) => item.replace(/\s*\n\s*/g, " ").trim()).filter((item) => item.length > 0);
+    return cleaned.map((item) => `- ${item}`).join("\n");
+  }
+  autoResizeTextarea(textarea) {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+  setStatus(message) {
+    if (!this.statusEl) {
+      return;
+    }
+    this.statusEl.setText(message);
+    window.setTimeout(() => {
+      this.statusEl?.setText("");
+    }, 2e3);
+  }
+};
+
+// src/ui/goal_task_view.ts
+var import_obsidian5 = require("obsidian");
+var GoalTaskView = class extends import_obsidian5.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.listEl = null;
+    this.statusEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose = null;
     this.taskRows = [];
     this.goalOptions = [];
     this.saveTimer = null;
@@ -1056,10 +3428,13 @@ var GoalTaskView = class extends import_obsidian3.ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
+    this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3" });
     renderNavigation(view, GOAL_TASK_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     this.statusEl = view.createEl("div", { cls: "lifeplanner-goal-task-status" });
     const section = view.createEl("div", {
       cls: "lifeplanner-weekly-section lifeplanner-action-plan-section"
@@ -1074,43 +3449,86 @@ var GoalTaskView = class extends import_obsidian3.ItemView {
     this.listEl = section.createEl("div", {
       cls: "lifeplanner-weekly-list lifeplanner-action-plan-list"
     });
-    await this.renderTasks();
+    const hiddenWrap = section.createEl("div", { cls: "lifeplanner-action-plan-hidden" });
+    const hiddenHeader = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-action-plan-hidden-header"
+    });
+    const hiddenToggle = hiddenHeader.createEl("button", { text: "\u975E\u8868\u793A\u30EA\u30B9\u30C8" });
+    const hiddenList = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list is-hidden"
+    });
+    const listContext = await this.renderTasks(this.listEl, hiddenList, hiddenWrap, hiddenToggle);
     addButton.addEventListener("click", (event) => {
       event.preventDefault();
-      this.addTaskRow(this.goalOptions);
+      if (!listContext) {
+        return;
+      }
+      this.addTaskRow(this.goalOptions, listContext);
     });
   }
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
     this.taskRows = [];
     if (this.saveTimer) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
   }
-  async renderTasks() {
+  async renderTasks(activeList, hiddenList, hiddenWrap, hiddenToggle) {
     if (!this.listEl) {
-      return;
+      return null;
     }
     this.listEl.empty();
+    hiddenList.empty();
     this.taskRows = [];
     const tasks = await this.tasksService.listTasks();
     const goals = await this.goalsService.listGoals();
     this.goalOptions = goals.map((goal) => ({ title: goal.title }));
+    let hiddenOpen = false;
+    const setHiddenOpen = (open) => {
+      hiddenOpen = open;
+      hiddenList.classList.toggle("is-hidden", !hiddenOpen);
+    };
+    const updateHiddenCount = () => {
+      const count = hiddenList.querySelectorAll(".lifeplanner-action-plan-row").length;
+      hiddenToggle.setText(`\u975E\u8868\u793A\u30EA\u30B9\u30C8 (${count})`);
+      hiddenWrap.classList.toggle("is-empty", count === 0);
+      if (count === 0) {
+        setHiddenOpen(false);
+      }
+    };
+    const moveRow = (row, done) => {
+      const target = done ? hiddenList : activeList;
+      if (row.parentElement !== target) {
+        target.appendChild(row);
+      }
+      updateHiddenCount();
+    };
+    hiddenToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      setHiddenOpen(!hiddenOpen);
+    });
     if (tasks.length === 0) {
-      this.addTaskRow(this.goalOptions);
-      return;
+      const context = { activeList, hiddenList, updateHiddenCount, moveRow };
+      this.addTaskRow(this.goalOptions, context);
+      updateHiddenCount();
+      return context;
     }
     for (const task of tasks) {
-      this.addTaskRow(this.goalOptions, task.goalId, task.title, task.status === "done");
+      this.addTaskRow(this.goalOptions, { activeList, hiddenList, updateHiddenCount, moveRow }, task.goalId, task.title, task.status === "done");
     }
+    updateHiddenCount();
+    return { activeList, hiddenList, updateHiddenCount, moveRow };
   }
-  addTaskRow(goals, goalId = "", title = "", done = false) {
+  addTaskRow(goals, context, goalId = "", title = "", done = false) {
     if (!this.listEl) {
       return;
     }
-    const row = this.listEl.createEl("div", {
+    const row = context.activeList.createEl("div", {
       cls: "lifeplanner-action-plan-row lifeplanner-action-plan-task-row"
     });
     const checkbox = row.createEl("input", {
@@ -1140,18 +3558,22 @@ var GoalTaskView = class extends import_obsidian3.ItemView {
     });
     input.placeholder = "\u30BF\u30B9\u30AF\u5185\u5BB9";
     input.value = title;
-    const remove = row.createEl("button", { text: "\xD7", cls: "lifeplanner-action-plan-remove" });
+    const menuScope = this.viewEl ?? this.listEl ?? row;
     const onChange = () => this.scheduleSave();
-    checkbox.addEventListener("change", onChange);
+    checkbox.addEventListener("change", () => {
+      context.moveRow(row, checkbox.checked);
+      onChange();
+    });
     select.addEventListener("change", onChange);
     input.addEventListener("input", onChange);
-    remove.addEventListener("click", (event) => {
-      event.preventDefault();
+    attachDeleteMenu(row, menuScope, () => {
       row.remove();
       this.taskRows = this.taskRows.filter((item) => item.titleInput !== input);
+      context.updateHiddenCount();
       this.scheduleSave();
     });
     this.taskRows.push({ checkbox, goalSelect: select, titleInput: input });
+    context.moveRow(row, done);
   }
   scheduleSave() {
     if (this.saveTimer) {
@@ -1187,8 +3609,8 @@ var GoalTaskView = class extends import_obsidian3.ItemView {
 };
 
 // src/ui/goals_view.ts
-var import_obsidian4 = require("obsidian");
-var LEVELS = [
+var import_obsidian6 = require("obsidian");
+var LEVELS2 = [
   "\u4EBA\u751F",
   "\u9577\u671F",
   "\u4E2D\u671F",
@@ -1197,7 +3619,7 @@ var LEVELS = [
   "\u6708\u9593",
   "\u9031\u9593"
 ];
-var GoalsView = class extends import_obsidian4.ItemView {
+var GoalsView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.listEl = null;
@@ -1226,10 +3648,11 @@ var GoalsView = class extends import_obsidian4.ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
     view.createEl("h2", { text: "\u76EE\u6A19" });
     renderNavigation(view, GOALS_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     const formWrap = view.createEl("div", { cls: "lifeplanner-goals-form-wrap" });
     this.formWrapEl = formWrap;
     const formToggle = formWrap.createEl("button", {
@@ -1247,7 +3670,7 @@ var GoalsView = class extends import_obsidian4.ItemView {
     });
     levelField.createEl("label", { text: "\u30AB\u30C6\u30B4\u30EA" });
     const levelSelect = levelField.createEl("select");
-    for (const level of LEVELS) {
+    for (const level of LEVELS2) {
       levelSelect.createEl("option", { text: level, value: level });
     }
     const parentField = form.createEl("div", {
@@ -1425,7 +3848,7 @@ var GoalsView = class extends import_obsidian4.ItemView {
   }
   async handleEdit(node) {
     const parentLevel = node.parentLevel;
-    const allowedLevels = parentLevel ? levelsBelow(parentLevel) : LEVELS;
+    const allowedLevels = parentLevel ? levelsBelow(parentLevel) : LEVELS2;
     const goals = await this.goalsService.listGoals();
     const byId = new Map(goals.map((goal) => [goal.id, goal]));
     const parentTitle = node.parentGoalId ? byId.get(node.parentGoalId)?.title ?? "" : "";
@@ -1521,8 +3944,8 @@ var GoalsView = class extends import_obsidian4.ItemView {
       this.setStatus("\u5B50\u5B6B\u306B\u306F\u79FB\u52D5\u3067\u304D\u307E\u305B\u3093");
       return;
     }
-    const sourceLevelIndex = LEVELS.indexOf(source.level);
-    const targetLevelIndex = target.level ? LEVELS.indexOf(target.level) : -1;
+    const sourceLevelIndex = LEVELS2.indexOf(source.level);
+    const targetLevelIndex = target.level ? LEVELS2.indexOf(target.level) : -1;
     let newParentId = target.parentGoalId;
     if (targetLevelIndex >= 0 && sourceLevelIndex >= 0) {
       if (targetLevelIndex < sourceLevelIndex) {
@@ -1537,7 +3960,7 @@ var GoalsView = class extends import_obsidian4.ItemView {
       return;
     }
     if (parentGoal) {
-      const parentLevelIndex = LEVELS.indexOf(parentGoal.level);
+      const parentLevelIndex = LEVELS2.indexOf(parentGoal.level);
       if (parentLevelIndex >= sourceLevelIndex) {
         this.setStatus("\u89AA\u76EE\u6A19\u306E\u968E\u5C64\u304C\u4E0A\u3067\u3042\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059");
         return;
@@ -1814,13 +4237,13 @@ function renderGoalTree(container, nodes, depth, onEdit, onDelete, onAddChild, o
   }
 }
 function levelsBelow(current) {
-  const index = LEVELS.indexOf(current);
-  if (index < 0 || index + 1 >= LEVELS.length) {
+  const index = LEVELS2.indexOf(current);
+  if (index < 0 || index + 1 >= LEVELS2.length) {
     return [current];
   }
-  return LEVELS.slice(index + 1);
+  return LEVELS2.slice(index + 1);
 }
-var GoalEditModal = class extends import_obsidian4.Modal {
+var GoalEditModal = class extends import_obsidian6.Modal {
   constructor(app, options) {
     super(app);
     this.options = options;
@@ -1880,362 +4303,14 @@ var GoalEditModal = class extends import_obsidian4.Modal {
 };
 
 // src/ui/inbox_view.ts
-var import_obsidian5 = require("obsidian");
-
-// src/services/inbox_service.ts
-var InboxService = class {
-  constructor(repository, baseDir, defaultTags) {
-    this.repository = repository;
-    this.baseDir = baseDir;
-    this.defaultTags = defaultTags;
-  }
-  async listItems() {
-    const content = await this.repository.read(resolveLifePlannerPath("Inbox", this.baseDir));
-    if (!content) {
-      return [];
-    }
-    return parseInboxItems(content);
-  }
-  async addItem(content) {
-    const items = await this.listItems();
-    const item = {
-      id: `inbox-${Date.now()}`,
-      content,
-      destination: "none",
-      status: "new"
-    };
-    items.push(item);
-    await this.saveItems(items);
-    return item;
-  }
-  async markTriaged(itemId, destination) {
-    const items = await this.listItems();
-    const remaining = items.filter((item) => item.id !== itemId);
-    await this.saveItems(remaining);
-  }
-  async saveItems(items) {
-    const content = serializeInboxItems(items, this.defaultTags);
-    await this.repository.write(resolveLifePlannerPath("Inbox", this.baseDir), content);
-  }
-};
-function parseInboxItems(content) {
-  const items = [];
-  const lines = content.split("\n");
-  for (const line of lines) {
-    const match = line.match(/^- \[.\] (.+?)(?: \[dest:(.+)\])?$/);
-    if (!match) {
-      continue;
-    }
-    const destination = match[2] || "none";
-    items.push({
-      id: `inbox-${items.length}`,
-      content: match[1].trim(),
-      destination,
-      status: destination === "none" ? "new" : "triaged"
-    });
-  }
-  return items;
-}
-function serializeInboxItems(items, defaultTags = []) {
-  const lines = [];
-  lines.push("# Inbox");
-  lines.push("");
-  if (items.length === 0) {
-    lines.push("- [ ] ");
-  } else {
-    for (const item of items) {
-      const dest = item.destination === "none" ? "" : ` [dest:${item.destination}]`;
-      lines.push(`- [ ] ${item.content}${dest}`);
-    }
-  }
-  lines.push("");
-  return prependTagFrontmatter(lines, defaultTags).join("\n");
-}
-
-// src/services/weekly_plan_io.ts
-var DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
-var ROUTINE_DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
-function serializeWeeklyPlan(plan, defaultTags = []) {
-  const lines = [];
-  lines.push("# \u9031\u9593\u8A08\u753B");
-  lines.push("");
-  lines.push(`\u9031\u8868\u793A: ${plan.weekLabel ?? ""}`);
-  lines.push("");
-  lines.push("## \u4ECA\u6708\u306E\u30C6\u30FC\u30DE");
-  lines.push("");
-  lines.push(plan.monthTheme ? `- ${plan.monthTheme}` : "- ");
-  lines.push("");
-  lines.push("## \u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5");
-  lines.push("");
-  lines.push(`| \u884C\u52D5 | ${ROUTINE_DAYS.join(" | ")} |`);
-  lines.push(`| --- | ${ROUTINE_DAYS.map(() => "---").join(" | ")} |`);
-  if (plan.routineActions.length === 0) {
-    lines.push(`|  | ${ROUTINE_DAYS.map(() => "[ ]").join(" | ")} |`);
-  } else {
-    for (const action of plan.routineActions) {
-      const checks = ROUTINE_DAYS.map((day) => action.checks[day] ? "[x]" : "[ ]");
-      lines.push(`| ${action.title} | ${checks.join(" | ")} |`);
-    }
-  }
-  lines.push("");
-  lines.push("## \u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF");
-  lines.push("");
-  if (plan.roles.length === 0) {
-    lines.push("### \u5F79\u52721");
-    lines.push("- ");
-    lines.push("");
-  } else {
-    for (const role of plan.roles) {
-      lines.push(`### ${role.role}`);
-      if (role.goals.length === 0) {
-        lines.push("- ");
-      } else {
-        for (const goal of role.goals) {
-          lines.push(`- ${goal}`);
-        }
-      }
-      lines.push("");
-    }
-  }
-  lines.push("## \u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3");
-  lines.push("");
-  if (plan.actionPlans.length === 0) {
-    lines.push("- [ ] ");
-  } else {
-    for (const item of plan.actionPlans) {
-      const checked = item.done ? "[x]" : "[ ]";
-      lines.push(`- ${checked} ${item.title}`);
-    }
-  }
-  lines.push("## \u4ECA\u9031\u306E\u632F\u308A\u8FD4\u308A");
-  lines.push("");
-  lines.push("### \u826F\u304B\u3063\u305F\u3053\u3068");
-  if (plan.reflectionGood.length === 0) {
-    lines.push("- ");
-  } else {
-    for (const item of plan.reflectionGood) {
-      lines.push(`- ${item}`);
-    }
-  }
-  lines.push("");
-  lines.push("### \u8AB2\u984C");
-  if (plan.reflectionIssues.length === 0) {
-    lines.push("- ");
-  } else {
-    for (const item of plan.reflectionIssues) {
-      lines.push(`- ${item}`);
-    }
-  }
-  lines.push("");
-  lines.push("## \u65E5\u4ED8\u3054\u3068\u306E\u4E00\u8A00\u30E1\u30E2\u6B04");
-  lines.push("");
-  for (const day of DAYS) {
-    lines.push(`### ${day}`);
-    const memos = plan.dailyMemos[day] ?? [];
-    if (memos.length === 0) {
-      lines.push("- ");
-    } else {
-      for (const memo of memos) {
-        lines.push(`- ${memo}`);
-      }
-    }
-    lines.push("");
-  }
-  return prependTagFrontmatter(lines, defaultTags).join("\n");
-}
-function parseWeeklyPlan(content) {
-  const slots = DAYS.map((day) => ({ day, entries: [] }));
-  const dailyMemos = {
-    \u6708: [],
-    \u706B: [],
-    \u6C34: [],
-    \u6728: [],
-    \u91D1: [],
-    \u571F: [],
-    \u65E5: []
-  };
-  const routineActions = [];
-  const roles = [];
-  const reflectionGood = [];
-  const reflectionIssues = [];
-  const actionPlans = [];
-  let monthTheme = "";
-  let weekLabel = "";
-  let section = "";
-  let currentDay = null;
-  let currentRole = null;
-  const lines = content.split("\n");
-  for (const line of lines) {
-    if (line.startsWith("## ")) {
-      section = line.replace(/^##\s+/, "");
-      currentDay = null;
-      currentRole = null;
-      continue;
-    }
-    if (line.startsWith("\u9031\u8868\u793A:")) {
-      weekLabel = line.replace("\u9031\u8868\u793A:", "").trim();
-      continue;
-    }
-    if (section === "\u4ECA\u6708\u306E\u30C6\u30FC\u30DE") {
-      const match = line.match(/^\-\s*(.+)$/);
-      if (match && match[1].trim()) {
-        monthTheme = match[1].trim();
-      }
-      continue;
-    }
-    if (section === "\u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5") {
-      if (line.startsWith("|")) {
-        const cells = line.split("|").map((cell) => cell.trim());
-        if (cells.length >= 3 && cells[1] !== "\u884C\u52D5" && cells[1] !== "---") {
-          const title = cells[1] || "";
-          if (title) {
-            const checks = {};
-            ROUTINE_DAYS.forEach((day, idx) => {
-              const cell = cells[idx + 2] || "";
-              checks[day] = cell.includes("[x]");
-            });
-            routineActions.push({ title, checks });
-          }
-        }
-      }
-      continue;
-    }
-    if (section === "\u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF") {
-      const roleMatch = line.match(/^###\s+(.+)$/);
-      if (roleMatch) {
-        currentRole = { role: roleMatch[1].trim(), goals: [] };
-        roles.push(currentRole);
-        continue;
-      }
-      const goalMatch = line.match(/^\-\s*(.+)$/);
-      if (goalMatch && currentRole && goalMatch[1].trim()) {
-        currentRole.goals.push(goalMatch[1].trim());
-      }
-      continue;
-    }
-    if (section === "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3") {
-      const itemMatch = line.match(/^\-\s*\[( |x)\]\s*(.+)$/);
-      if (itemMatch && itemMatch[2].trim()) {
-        actionPlans.push({ title: itemMatch[2].trim(), done: itemMatch[1] === "x" });
-      }
-      continue;
-    }
-    if (section === "\u4ECA\u9031\u306E\u632F\u308A\u8FD4\u308A") {
-      if (line.startsWith("### \u826F\u304B\u3063\u305F\u3053\u3068")) {
-        currentDay = "good";
-        continue;
-      }
-      if (line.startsWith("### \u8AB2\u984C")) {
-        currentDay = "issue";
-        continue;
-      }
-      const entryMatch = line.match(/^\-\s*(.+)$/);
-      if (entryMatch && entryMatch[1].trim()) {
-        if (currentDay === "good") {
-          reflectionGood.push(entryMatch[1].trim());
-        } else if (currentDay === "issue") {
-          reflectionIssues.push(entryMatch[1].trim());
-        }
-      }
-      continue;
-    }
-    if (section === "\u65E5\u4ED8\u3054\u3068\u306E\u4E00\u8A00\u30E1\u30E2\u6B04") {
-      const dayMatch = line.match(/^###\s+([月火水木金土日])$/);
-      if (dayMatch) {
-        currentDay = dayMatch[1];
-        continue;
-      }
-      const entryMatch = line.match(/^\-\s*(.+)$/);
-      if (entryMatch && currentDay && entryMatch[1].trim()) {
-        dailyMemos[currentDay].push(entryMatch[1].trim());
-      }
-    }
-  }
-  return {
-    id: "weekly",
-    weekStart: "",
-    weekEnd: "",
-    weeklyGoals: [],
-    weekLabel,
-    monthTheme,
-    routineActions,
-    roles,
-    actionPlans,
-    reflectionGood,
-    reflectionIssues,
-    dailyMemos,
-    slots
-  };
-}
-
-// src/services/inbox_triage.ts
-var InboxTriage = class {
-  constructor(repository, baseDir, weekStart, defaultTags) {
-    this.repository = repository;
-    this.baseDir = baseDir;
-    this.weekStart = weekStart;
-    this.defaultTags = defaultTags;
-    this.goalsService = new GoalsService(repository, baseDir, defaultTags);
-    this.tasksService = new TasksService(repository, baseDir, defaultTags);
-  }
-  async toGoal(item) {
-    await this.goalsService.addGoal("\u9031\u9593", item.content);
-  }
-  async toTask(item) {
-    await this.tasksService.addTask("\u9031\u9593", item.content);
-  }
-  async toWeekly(item) {
-    const weekStart = computeWeekStart(/* @__PURE__ */ new Date(), 0, this.weekStart);
-    const path = resolveWeeklyPlanPath(weekStart, this.baseDir);
-    const content = await this.repository.read(path);
-    const plan = content ? parseWeeklyPlan(content) : emptyPlan();
-    plan.actionPlans.push({ title: item.content, done: false });
-    await this.repository.write(path, serializeWeeklyPlan(plan, this.defaultTags));
-  }
-};
-function emptyPlan() {
-  return {
-    id: "weekly",
-    weekStart: "",
-    weekEnd: "",
-    slots: [
-      { day: "\u6708", entries: [] },
-      { day: "\u706B", entries: [] },
-      { day: "\u6C34", entries: [] },
-      { day: "\u6728", entries: [] },
-      { day: "\u91D1", entries: [] },
-      { day: "\u571F", entries: [] },
-      { day: "\u65E5", entries: [] }
-    ],
-    weeklyGoals: [],
-    weekLabel: "",
-    monthTheme: "",
-    routineActions: [],
-    roles: [],
-    actionPlans: [],
-    reflectionGood: [],
-    reflectionIssues: [],
-    dailyMemos: { \u6708: [], \u706B: [], \u6C34: [], \u6728: [], \u91D1: [], \u571F: [], \u65E5: [] },
-    reviewNotes: ""
-  };
-}
-function computeWeekStart(today, offset, weekStart) {
-  const base = new Date(today);
-  base.setDate(base.getDate() + offset * 7);
-  const day = base.getDay();
-  const startIndex = weekStart === "sunday" ? 0 : 1;
-  const diff = (day - startIndex + 7) % 7;
-  const start = new Date(base);
-  start.setDate(base.getDate() - diff);
-  return start;
-}
-
-// src/ui/inbox_view.ts
-var InboxView = class extends import_obsidian5.ItemView {
+var import_obsidian7 = require("obsidian");
+var InboxView = class extends import_obsidian7.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
+    this.disposeMenuClose = null;
+    this.viewEl = null;
     this.plugin = plugin;
     const repository = new MarkdownRepository(this.plugin.app);
     this.inboxService = new InboxService(
@@ -2249,6 +4324,11 @@ var InboxView = class extends import_obsidian5.ItemView {
       this.plugin.settings.weekStart,
       this.plugin.settings.defaultTags
     );
+    this.goalsService = new GoalsService(
+      repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
   }
   getViewType() {
     return INBOX_VIEW_TYPE;
@@ -2260,16 +4340,19 @@ var InboxView = class extends import_obsidian5.ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
     view.createEl("h2", { text: "Inbox" });
     renderNavigation(view, INBOX_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     const form = view.createEl("div", { cls: "lifeplanner-inbox-form lifeplanner-form" });
     const input = form.createEl("input", { type: "text" });
     input.placeholder = "\u30E1\u30E2\u3092\u5165\u529B";
     const addButton = form.createEl("button", { text: "\u8FFD\u52A0" });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-inbox-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-inbox-list" });
+    this.disposeMenuClose = registerRowMenuClose(view);
     addButton.addEventListener("click", () => {
       void this.handleAdd(input.value.trim());
       input.value = "";
@@ -2279,6 +4362,9 @@ var InboxView = class extends import_obsidian5.ItemView {
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
   }
   async handleAdd(content) {
     if (!content) {
@@ -2286,19 +4372,36 @@ var InboxView = class extends import_obsidian5.ItemView {
       return;
     }
     await this.inboxService.addItem(content);
-    this.setStatus("\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+    this.setStatus("\u30E1\u30E2\u3092\u8FFD\u52A0\u3057\u307E\u3057\u305F");
     await this.renderItems();
   }
-  async handleTriage(item, destination) {
-    if (destination === "goal") {
-      await this.inboxTriage.toGoal(item);
-    } else if (destination === "task") {
-      await this.inboxTriage.toTask(item);
-    } else {
-      await this.inboxTriage.toWeekly(item);
-    }
-    await this.inboxService.markTriaged(item.id, destination);
-    this.setStatus("\u632F\u308A\u5206\u3051\u307E\u3057\u305F");
+  async handleGoalTriage(item, level) {
+    await this.inboxTriage.toGoal(item, level);
+    await this.inboxService.deleteItem(item.id);
+    this.setStatus("\u76EE\u6A19\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+    await this.renderItems();
+  }
+  async handleTaskTriage(item, goalTitle) {
+    await this.inboxTriage.toTask(item, goalTitle);
+    await this.inboxService.deleteItem(item.id);
+    this.setStatus("\u30BF\u30B9\u30AF\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+    await this.renderItems();
+  }
+  async handleWeeklyTriage(item) {
+    await this.inboxTriage.toWeekly(item);
+    await this.inboxService.deleteItem(item.id);
+    this.setStatus("\u9031\u9593\u8A08\u753B\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+    await this.renderItems();
+  }
+  async handleIssueTriage(item) {
+    await this.inboxTriage.toIssue(item);
+    await this.inboxService.deleteItem(item.id);
+    this.setStatus("\u30A4\u30B7\u30E5\u30FC\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+    await this.renderItems();
+  }
+  async handleDelete(itemId) {
+    await this.inboxService.deleteItem(itemId);
+    this.setStatus("\u524A\u9664\u3057\u307E\u3057\u305F");
     await this.renderItems();
   }
   async renderItems() {
@@ -2311,16 +4414,181 @@ var InboxView = class extends import_obsidian5.ItemView {
       this.listEl.createEl("div", { text: "(\u672A\u767B\u9332)" });
       return;
     }
-    for (const item of items) {
+    const sortedItems = [...items].sort(
+      (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
+    );
+    const goals = await this.goalsService.listGoals();
+    const goalTitles = goals.map((goal) => goal.title);
+    const goalLevels = ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"];
+    for (const item of sortedItems) {
       const row = this.listEl.createEl("div", { cls: "lifeplanner-inbox-row" });
-      row.createEl("span", { text: item.content });
-      const controls = row.createEl("div", { cls: "lifeplanner-inbox-controls" });
-      const toGoal = controls.createEl("button", { text: "\u76EE\u6A19\u3078" });
-      const toTask = controls.createEl("button", { text: "\u30BF\u30B9\u30AF\u3078" });
-      const toWeekly = controls.createEl("button", { text: "\u9031\u9593\u3078" });
-      toGoal.addEventListener("click", () => void this.handleTriage(item, "goal"));
-      toTask.addEventListener("click", () => void this.handleTriage(item, "task"));
-      toWeekly.addEventListener("click", () => void this.handleTriage(item, "weekly"));
+      const meta = row.createEl("div", { cls: "lifeplanner-inbox-meta" });
+      meta.createEl("span", {
+        cls: "lifeplanner-inbox-timestamp",
+        text: this.formatTimestamp(item.createdAt)
+      });
+      const destLabel = this.formatDestination(item.destination);
+      if (destLabel) {
+        meta.createEl("span", { cls: "lifeplanner-inbox-destination", text: destLabel });
+      }
+      const inputRow = row.createEl("div", { cls: "lifeplanner-inbox-input-row" });
+      const input = inputRow.createEl("input", { type: "text", cls: "lifeplanner-inbox-input" });
+      input.placeholder = "\u30E1\u30E2";
+      input.value = item.content;
+      let lastSaved = item.content;
+      input.addEventListener("input", () => {
+        const nextValue = input.value.trim();
+        if (!nextValue || nextValue === lastSaved) {
+          return;
+        }
+        lastSaved = nextValue;
+        void this.inboxService.updateItem(item.id, nextValue).then(() => {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        });
+      });
+      input.addEventListener("blur", () => {
+        if (input.value.trim().length === 0) {
+          input.value = lastSaved;
+          this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+        }
+      });
+      const menuHost = inputRow.createEl("div", { cls: "lifeplanner-inbox-menu" });
+      const menuScope = this.viewEl ?? this.listEl ?? row;
+      const resolveContent = () => {
+        const content = input.value.trim();
+        if (!content) {
+          input.value = lastSaved;
+          this.setStatus("\u30E1\u30E2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+          input.focus();
+          return null;
+        }
+        if (content !== item.content) {
+          return { ...item, content };
+        }
+        return item;
+      };
+      const panels = row.createEl("div", { cls: "lifeplanner-inbox-panels" });
+      const goalPanel = panels.createEl("div", {
+        cls: "lifeplanner-inbox-panel lifeplanner-hidden"
+      });
+      goalPanel.createEl("span", { cls: "lifeplanner-inbox-panel-label", text: "\u30B9\u30D1\u30F3" });
+      const goalSelect = goalPanel.createEl("select");
+      goalLevels.forEach((level) => {
+        goalSelect.createEl("option", { text: level, value: level });
+      });
+      goalSelect.value = "\u9031\u9593";
+      const goalConfirm = goalPanel.createEl("button", { text: "\u8FFD\u52A0" });
+      const taskPanel = panels.createEl("div", {
+        cls: "lifeplanner-inbox-panel lifeplanner-hidden"
+      });
+      taskPanel.createEl("span", { cls: "lifeplanner-inbox-panel-label", text: "\u76EE\u6A19" });
+      const taskSelect = taskPanel.createEl("select");
+      if (goalTitles.length > 0) {
+        const placeholder = taskSelect.createEl("option", { text: "\u76EE\u6A19\u3092\u9078\u629E", value: "" });
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        goalTitles.forEach((title) => {
+          taskSelect.createEl("option", { text: title, value: title });
+        });
+      } else {
+        taskSelect.createEl("option", { text: "\u9031\u9593", value: "\u9031\u9593" });
+        taskSelect.value = "\u9031\u9593";
+      }
+      const taskConfirm = taskPanel.createEl("button", { text: "\u8FFD\u52A0" });
+      const togglePanel = (panel) => {
+        const show = panel.classList.contains("lifeplanner-hidden");
+        goalPanel.classList.add("lifeplanner-hidden");
+        taskPanel.classList.add("lifeplanner-hidden");
+        if (show) {
+          panel.classList.remove("lifeplanner-hidden");
+        }
+      };
+      goalConfirm.addEventListener("click", () => {
+        const current = resolveContent();
+        if (!current) {
+          return;
+        }
+        void this.handleGoalTriage(current, goalSelect.value);
+        goalPanel.classList.add("lifeplanner-hidden");
+      });
+      taskConfirm.addEventListener("click", () => {
+        const current = resolveContent();
+        if (!current) {
+          return;
+        }
+        if (!taskSelect.value) {
+          this.setStatus("\u76EE\u6A19\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044");
+          return;
+        }
+        void this.handleTaskTriage(current, taskSelect.value);
+        taskPanel.classList.add("lifeplanner-hidden");
+      });
+      attachRowMenu(menuHost, menuScope, [
+        {
+          label: "\u76EE\u6A19\u3078",
+          onSelect: () => togglePanel(goalPanel)
+        },
+        {
+          label: "\u30BF\u30B9\u30AF\u3078",
+          onSelect: () => togglePanel(taskPanel)
+        },
+        {
+          label: "\u9031\u9593\u3078",
+          onSelect: () => {
+            const current = resolveContent();
+            if (!current) {
+              return;
+            }
+            void this.handleWeeklyTriage(current);
+            goalPanel.classList.add("lifeplanner-hidden");
+            taskPanel.classList.add("lifeplanner-hidden");
+          }
+        },
+        {
+          label: "\u30A4\u30B7\u30E5\u30FC\u3078",
+          onSelect: () => {
+            const current = resolveContent();
+            if (!current) {
+              return;
+            }
+            void this.handleIssueTriage(current);
+            goalPanel.classList.add("lifeplanner-hidden");
+            taskPanel.classList.add("lifeplanner-hidden");
+          }
+        },
+        {
+          label: "\u524A\u9664",
+          onSelect: () => {
+            void this.handleDelete(item.id);
+          }
+        }
+      ]);
+    }
+  }
+  formatTimestamp(value) {
+    if (!value) {
+      return "\u65E5\u6642\u672A\u8A2D\u5B9A";
+    }
+    const date = new Date(value);
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    const hours = `${date.getHours()}`.padStart(2, "0");
+    const minutes = `${date.getMinutes()}`.padStart(2, "0");
+    return `${year}/${month}/${day} ${hours}:${minutes}`;
+  }
+  formatDestination(destination) {
+    switch (destination) {
+      case "goal":
+        return "\u632F\u308A\u5206\u3051: \u76EE\u6A19";
+      case "task":
+        return "\u632F\u308A\u5206\u3051: \u30BF\u30B9\u30AF";
+      case "weekly":
+        return "\u632F\u308A\u5206\u3051: \u9031\u9593";
+      case "issue":
+        return "\u632F\u308A\u5206\u3051: \u30A4\u30B7\u30E5\u30FC";
+      default:
+        return "";
     }
   }
   setStatus(message) {
@@ -2335,139 +4603,9 @@ var InboxView = class extends import_obsidian5.ItemView {
 };
 
 // src/ui/issues_view.ts
-var import_obsidian6 = require("obsidian");
-
-// src/services/issues_service.ts
-var IssuesService = class {
-  constructor(repository, baseDir, defaultTags) {
-    this.repository = repository;
-    this.baseDir = baseDir;
-    this.defaultTags = defaultTags;
-  }
-  async listIssues() {
-    const path = resolveLifePlannerPath("Issues", this.baseDir);
-    const content = await this.repository.read(path);
-    if (!content) {
-      await this.repository.write(path, serializeIssues([], this.defaultTags));
-      return [];
-    }
-    return parseIssues(content);
-  }
-  async saveIssues(issues) {
-    const content = serializeIssues(issues, this.defaultTags);
-    await this.repository.write(resolveLifePlannerPath("Issues", this.baseDir), content);
-  }
-};
-function serializeIssues(issues, defaultTags = []) {
-  const lines = [];
-  lines.push("# Issues");
-  lines.push("");
-  const grouped = /* @__PURE__ */ new Map();
-  for (const issue of issues) {
-    const list = grouped.get(issue.status) ?? [];
-    list.push(issue);
-    grouped.set(issue.status, list);
-  }
-  for (const [status, items] of grouped) {
-    lines.push(`## ${status}`);
-    lines.push("");
-    for (const issue of items) {
-      lines.push(`### ${issue.title}`);
-      lines.push(`ID: ${issue.id}`);
-      if (issue.linkedGoalId) {
-        lines.push(`Goal: ${issue.linkedGoalId}`);
-      }
-      if (issue.tags && issue.tags.length > 0) {
-        lines.push(`Tags: ${issue.tags.join(", ")}`);
-      }
-      if (issue.dueDate) {
-        lines.push(`Due: ${issue.dueDate}`);
-      }
-      if (issue.priority) {
-        lines.push(`Priority: ${issue.priority}`);
-      }
-      lines.push("");
-      if (issue.body) {
-        lines.push(issue.body);
-      } else {
-        lines.push("- ");
-      }
-      lines.push("");
-    }
-  }
-  return prependTagFrontmatter(lines, defaultTags).join("\n");
-}
-function parseIssues(content) {
-  const issues = [];
-  const lines = content.split("\n");
-  let currentStatus = "";
-  let current = null;
-  let bodyLines = [];
-  const flush = () => {
-    if (!current) {
-      return;
-    }
-    current.body = bodyLines.join("\n").trim();
-    issues.push(current);
-    current = null;
-    bodyLines = [];
-  };
-  for (const line of lines) {
-    const statusMatch = line.match(/^##\s+(.+)$/);
-    if (statusMatch) {
-      flush();
-      currentStatus = statusMatch[1].trim();
-      continue;
-    }
-    const issueMatch = line.match(/^###\s+(.+)$/);
-    if (issueMatch) {
-      flush();
-      const title = issueMatch[1].trim();
-      current = {
-        id: `issue-${Date.now()}`,
-        title,
-        status: currentStatus || "Backlog",
-        body: ""
-      };
-      continue;
-    }
-    if (!current) {
-      continue;
-    }
-    if (line.startsWith("ID:")) {
-      const id = line.replace("ID:", "").trim();
-      current.id = id || current.id;
-      continue;
-    }
-    if (line.startsWith("Goal:")) {
-      const goal = line.replace("Goal:", "").trim();
-      current.linkedGoalId = goal || void 0;
-      continue;
-    }
-    if (line.startsWith("Tags:")) {
-      const raw = line.replace("Tags:", "").trim();
-      current.tags = raw ? raw.split(",").map((tag) => tag.trim()).filter(Boolean) : void 0;
-      continue;
-    }
-    if (line.startsWith("Due:")) {
-      const due = line.replace("Due:", "").trim();
-      current.dueDate = due || void 0;
-      continue;
-    }
-    if (line.startsWith("Priority:")) {
-      const priority = line.replace("Priority:", "").trim();
-      current.priority = priority || void 0;
-      continue;
-    }
-    bodyLines.push(line);
-  }
-  flush();
-  return issues;
-}
-
-// src/ui/issues_view.ts
+var import_obsidian8 = require("obsidian");
 var PRIORITIES = ["Low", "Medium", "High"];
-var IssuesView = class extends import_obsidian6.ItemView {
+var IssuesView = class extends import_obsidian8.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.listEl = null;
@@ -2497,10 +4635,11 @@ var IssuesView = class extends import_obsidian6.ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
     view.createEl("h2", { text: "\u30A4\u30B7\u30E5\u30FC" });
     renderNavigation(view, ISSUES_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     this.statusEl = view.createEl("div", { cls: "lifeplanner-issues-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-kanban" });
     this.handleMenuClose = (event) => {
@@ -2631,7 +4770,7 @@ var IssuesView = class extends import_obsidian6.ItemView {
         }
         if (issue.body) {
           const body = card.createEl("div", { cls: "lifeplanner-kanban-body" });
-          void import_obsidian6.MarkdownRenderer.renderMarkdown(issue.body, body, "", this);
+          void import_obsidian8.MarkdownRenderer.renderMarkdown(issue.body, body, "", this);
         }
       }
     }
@@ -2674,7 +4813,7 @@ var IssuesView = class extends import_obsidian6.ItemView {
     }, 2e3);
   }
 };
-var IssueEditModal = class extends import_obsidian6.Modal {
+var IssueEditModal = class extends import_obsidian8.Modal {
   constructor(app, issue, columns, goals, onSubmit) {
     super(app);
     this.issue = { ...issue };
@@ -2752,7 +4891,7 @@ var IssueEditModal = class extends import_obsidian6.Modal {
 };
 
 // src/ui/simple_section_view.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/services/simple_section_service.ts
 var SimpleSectionService = class {
@@ -2807,11 +4946,13 @@ var SimpleSectionService = class {
 };
 
 // src/ui/simple_section_view.ts
-var SimpleSectionView = class extends import_obsidian7.ItemView {
+var SimpleSectionView = class extends import_obsidian9.ItemView {
   constructor(leaf, plugin, viewType, type, titleText) {
     super(leaf);
     this.statusEl = null;
     this.inputEl = null;
+    this.displayEl = null;
+    this.viewEl = null;
     this.plugin = plugin;
     this.viewType = viewType;
     this.titleText = titleText;
@@ -2833,22 +4974,80 @@ var SimpleSectionView = class extends import_obsidian7.ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
     view.createEl("h2", { text: this.titleText });
     renderNavigation(view, this.viewType, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
-    this.inputEl = view.createEl("textarea");
+    const body = view.createEl("div", { cls: "lifeplanner-simple-section-body" });
+    const hero = body.createEl("div", { cls: "lifeplanner-simple-section-hero" });
+    const actions = hero.createEl("div", { cls: "lifeplanner-simple-section-actions" });
+    const editButton = actions.createEl("button", { text: "\u7DE8\u96C6" });
+    editButton.setAttr("type", "button");
+    const deleteButton = actions.createEl("button", { text: "\u524A\u9664" });
+    deleteButton.setAttr("type", "button");
+    this.displayEl = hero.createEl("div", { cls: "lifeplanner-simple-section-display" });
+    this.inputEl = hero.createEl("textarea", { cls: "lifeplanner-simple-section-input" });
     this.inputEl.rows = 12;
     this.inputEl.value = await this.service.load();
+    const updateDisplay = () => {
+      if (!this.displayEl || !this.inputEl) {
+        return;
+      }
+      this.displayEl.empty();
+      const value = this.inputEl.value.trim();
+      if (!value) {
+        this.displayEl.setText("(\u672A\u8A18\u5165)");
+        this.displayEl.classList.add("is-empty");
+        return;
+      }
+      this.displayEl.classList.remove("is-empty");
+      void import_obsidian9.MarkdownRenderer.renderMarkdown(value, this.displayEl, "", this);
+    };
+    const setEditMode = (editing) => {
+      if (!this.displayEl || !this.inputEl) {
+        return;
+      }
+      this.inputEl.classList.toggle("lifeplanner-hidden", !editing);
+      this.displayEl.classList.toggle("lifeplanner-hidden", editing);
+      if (editing) {
+        this.inputEl.focus();
+      }
+    };
+    editButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      setEditMode(true);
+    });
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (!this.inputEl) {
+        return;
+      }
+      this.inputEl.value = "";
+      void this.service.save("");
+      updateDisplay();
+      setEditMode(false);
+      this.setStatus("\u524A\u9664\u3057\u307E\u3057\u305F");
+    });
     this.inputEl.addEventListener("input", () => {
       void this.service.save(this.inputEl?.value ?? "");
+      updateDisplay();
       this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
     });
+    this.inputEl.addEventListener("blur", () => {
+      updateDisplay();
+      setEditMode(false);
+    });
+    updateDisplay();
+    setEditMode(false);
   }
   async onClose() {
     this.statusEl = null;
     this.inputEl = null;
+    this.displayEl = null;
+    this.viewEl = null;
   }
   setStatus(message) {
     if (!this.statusEl) {
@@ -2862,17 +5061,21 @@ var SimpleSectionView = class extends import_obsidian7.ItemView {
 };
 
 // src/ui/table_section_view.ts
-var import_obsidian8 = require("obsidian");
-var TableSectionView = class extends import_obsidian8.ItemView {
+var import_obsidian10 = require("obsidian");
+var TableSectionView = class extends import_obsidian10.ItemView {
   constructor(leaf, plugin, viewType, type, titleText, columns) {
     super(leaf);
     this.statusEl = null;
     this.rows = [];
     this.tableEl = null;
+    this.enableRowActions = true;
+    this.viewEl = null;
+    this.disposeMenuClose = null;
     this.plugin = plugin;
     this.viewType = viewType;
     this.titleText = titleText;
     this.columns = columns;
+    this.sectionType = type;
     this.service = new TableSectionService(
       new MarkdownRepository(this.plugin.app),
       type,
@@ -2892,14 +5095,18 @@ var TableSectionView = class extends import_obsidian8.ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
+    this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: this.titleText });
     renderNavigation(view, this.viewType, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
     const header = view.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = header.createEl("button", { text: "\u8FFD\u52A0" });
     this.tableEl = view.createEl("div", { cls: "lifeplanner-table-grid" });
+    this.tableEl.dataset.sectionType = this.sectionType;
     await this.renderTable();
     addButton.addEventListener("click", () => {
       this.rows.push([]);
@@ -2911,13 +5118,16 @@ var TableSectionView = class extends import_obsidian8.ItemView {
     this.statusEl = null;
     this.tableEl = null;
     this.rows = [];
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
   }
   async renderTable() {
     if (!this.tableEl) {
       return;
     }
     this.tableEl.empty();
-    this.tableEl.style.gridTemplateColumns = this.columns.map((column) => {
+    const columnTemplate = this.columns.map((column) => {
       if (column.width) {
         return column.width;
       }
@@ -2929,6 +5139,8 @@ var TableSectionView = class extends import_obsidian8.ItemView {
       }
       return "minmax(160px, 1fr)";
     }).join(" ");
+    const actionColumn = this.enableRowActions ? "36px" : "";
+    this.tableEl.style.gridTemplateColumns = [columnTemplate, actionColumn].filter(Boolean).join(" ");
     this.rows = await this.service.loadRows();
     if (this.rows.length === 0) {
       this.rows.push([]);
@@ -2939,6 +5151,12 @@ var TableSectionView = class extends import_obsidian8.ItemView {
         text: column.label
       });
     });
+    if (this.enableRowActions) {
+      this.tableEl?.createEl("div", {
+        cls: "lifeplanner-table-cell lifeplanner-table-header",
+        text: ""
+      });
+    }
     this.rows.forEach((row, rowIndex) => {
       this.columns.forEach((column, colIndex) => {
         const cell = this.tableEl?.createEl("div", { cls: "lifeplanner-table-cell" });
@@ -2966,13 +5184,33 @@ var TableSectionView = class extends import_obsidian8.ItemView {
             this.setCell(rowIndex, colIndex, checkbox.checked ? "x" : "");
           });
         } else {
-          const input = cell.createEl("input", { type: "text" });
-          input.value = value;
-          input.addEventListener("input", () => {
-            this.setCell(rowIndex, colIndex, input.value);
-          });
+          if (column.multiline) {
+            const input = cell.createEl("textarea");
+            input.rows = 1;
+            input.value = value;
+            this.autoResizeTextarea(input);
+            input.addEventListener("input", () => {
+              this.setCell(rowIndex, colIndex, input.value);
+              this.autoResizeTextarea(input);
+            });
+          } else {
+            const input = cell.createEl("input", { type: "text" });
+            input.value = value;
+            input.addEventListener("input", () => {
+              this.setCell(rowIndex, colIndex, input.value);
+            });
+          }
         }
       });
+      if (this.enableRowActions) {
+        const cell = this.tableEl?.createEl("div", { cls: "lifeplanner-table-cell" });
+        const menuScope = this.viewEl ?? this.tableEl ?? cell;
+        if (cell && menuScope) {
+          attachDeleteMenu(cell, menuScope, () => {
+            this.removeRow(rowIndex);
+          });
+        }
+      }
     });
   }
   setCell(rowIndex, colIndex, value) {
@@ -2985,785 +5223,48 @@ var TableSectionView = class extends import_obsidian8.ItemView {
     await this.service.saveRows(this.rows);
     this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
   }
-  setStatus(message) {
-    if (!this.statusEl) {
-      return;
+  removeRow(rowIndex) {
+    this.rows.splice(rowIndex, 1);
+    if (this.rows.length === 0) {
+      this.rows.push([]);
     }
-    this.statusEl.setText(message);
-    window.setTimeout(() => {
-      this.statusEl?.setText("");
-    }, 2e3);
+    void this.save().then(() => this.renderTable());
   }
-};
-
-// src/ui/weekly_plan_view.ts
-var import_obsidian9 = require("obsidian");
-
-// src/services/weekly_shared_io.ts
-var ROUTINE_DAYS2 = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
-function serializeWeeklyShared(shared, defaultTags = []) {
-  const lines = [];
-  lines.push("# \u9031\u9593\u5171\u6709");
-  lines.push("");
-  lines.push("## \u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5");
-  lines.push("");
-  lines.push(`| \u884C\u52D5 | ${ROUTINE_DAYS2.join(" | ")} |`);
-  lines.push(`| --- | ${ROUTINE_DAYS2.map(() => "---").join(" | ")} |`);
-  if (shared.routineActions.length === 0) {
-    lines.push(`|  | ${ROUTINE_DAYS2.map(() => "[ ]").join(" | ")} |`);
-  } else {
-    for (const action of shared.routineActions) {
-      const checks = ROUTINE_DAYS2.map((day) => action.checks[day] ? "[x]" : "[ ]");
-      lines.push(`| ${action.title} | ${checks.join(" | ")} |`);
-    }
-  }
-  lines.push("");
-  lines.push("## \u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF");
-  lines.push("");
-  if (shared.roles.length === 0) {
-    lines.push("### \u5F79\u52721");
-    lines.push("");
-  } else {
-    for (const role of shared.roles) {
-      lines.push(`### ${role}`);
-      lines.push("");
-    }
-  }
-  lines.push("## \u6708\u9593\u30C6\u30FC\u30DE");
-  lines.push("");
-  const entries = Object.entries(shared.monthThemes);
-  if (entries.length === 0) {
-    lines.push("- ");
-  } else {
-    for (const [month, theme] of entries) {
-      lines.push(`- ${month}: ${theme}`);
-    }
-  }
-  return prependTagFrontmatter(lines, defaultTags).join("\n");
-}
-function parseWeeklyShared(content) {
-  const routineActions = [];
-  const roles = [];
-  const monthThemes = {};
-  let section = "";
-  let currentRole = null;
-  const lines = content.split("\n");
-  for (const line of lines) {
-    if (line.startsWith("## ")) {
-      section = line.replace(/^##\s+/, "");
-      currentRole = null;
-      continue;
-    }
-    if (section === "\u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5") {
-      if (line.startsWith("|")) {
-        const cells = line.split("|").map((cell) => cell.trim());
-        if (cells.length >= 3 && cells[1] !== "\u884C\u52D5" && cells[1] !== "---") {
-          const title = cells[1] || "";
-          if (title) {
-            const checks = {};
-            ROUTINE_DAYS2.forEach((day, idx) => {
-              const cell = cells[idx + 2] || "";
-              checks[day] = cell.includes("[x]");
-            });
-            routineActions.push({ title, checks });
-          }
-        }
-      }
-      continue;
-    }
-    if (section === "\u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF") {
-      const roleMatch = line.match(/^###\s+(.+)$/);
-      if (roleMatch) {
-        currentRole = roleMatch[1].trim();
-        if (currentRole) {
-          roles.push(currentRole);
-        }
-        continue;
-      }
-      continue;
-    }
-    if (section === "\u6708\u9593\u30C6\u30FC\u30DE") {
-      const themeMatch = line.match(/^\-\s*([0-9]{4}\-[0-9]{2})\s*:\s*(.+)$/);
-      if (themeMatch) {
-        monthThemes[themeMatch[1]] = themeMatch[2].trim();
-      }
-    }
-  }
-  return { routineActions, roles, monthThemes };
-}
-
-// src/ui/weekly_plan_view.ts
-var BASE_DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
-var ROUTINE_DAYS3 = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
-var LEVELS2 = ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"];
-var WeeklyPlanView = class extends import_obsidian9.ItemView {
-  constructor(leaf, plugin) {
-    super(leaf);
-    this.statusEl = null;
-    this.rootEl = null;
-    this.lastSavedContent = "";
-    this.weekLabelInput = null;
-    this.monthThemeInput = null;
-    this.routineRows = [];
-    this.roleSections = [];
-    this.actionPlanRows = [];
-    this.reflectionGoodInputs = [];
-    this.reflectionIssueInputs = [];
-    this.memoInputs = /* @__PURE__ */ new Map();
-    this.dayDateLabels = /* @__PURE__ */ new Map();
-    this.dailyMemoCards = /* @__PURE__ */ new Map();
-    this.saveTimer = null;
-    this.weekOffset = 0;
-    this.weekStart = /* @__PURE__ */ new Date();
-    this.currentWeekPath = "";
-    this.dayOrder = BASE_DAYS;
-    this.plugin = plugin;
-    this.repository = new MarkdownRepository(this.plugin.app);
-    this.tasksService = new TasksService(
-      new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir,
-      this.plugin.settings.defaultTags
-    );
-  }
-  getViewType() {
-    return WEEKLY_PLAN_VIEW_TYPE;
-  }
-  getDisplayText() {
-    return "\u9031\u9593\u8A08\u753B";
-  }
-  async onOpen() {
-    this.rootEl = this.contentEl;
-    await this.renderWeek();
-  }
-  async onClose() {
-    this.statusEl = null;
-    this.rootEl = null;
-    this.weekLabelInput = null;
-    this.monthThemeInput = null;
-    this.routineRows = [];
-    this.roleSections = [];
-    this.actionPlanRows = [];
-    this.reflectionGoodInputs = [];
-    this.reflectionIssueInputs = [];
-    this.memoInputs.clear();
-    this.dayDateLabels.clear();
-    this.dailyMemoCards.clear();
-    if (this.saveTimer) {
-      window.clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-  }
-  async renderWeek() {
-    if (!this.rootEl) {
-      return;
-    }
-    this.resetViewState();
-    this.rootEl.empty();
-    const view = this.rootEl.createEl("div", { cls: "lifeplanner-view" });
-    const header = view.createEl("div", { cls: "lifeplanner-weekly-header" });
-    header.createEl("h2", { text: "\u9031\u9593\u8A08\u753B" });
-    const navButtons = header.createEl("div", { cls: "lifeplanner-weekly-nav" });
-    const prevButton = navButtons.createEl("button", { text: "\u25C0 \u524D\u9031" });
-    const todayButton = navButtons.createEl("button", { text: "\u4ECA\u65E5" });
-    const nextButton = navButtons.createEl("button", { text: "\u6B21\u9031 \u25B6" });
-    renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
-    this.weekStart = computeWeekStart2(/* @__PURE__ */ new Date(), this.weekOffset, this.plugin.settings.weekStart);
-    this.dayOrder = dayOrder(this.plugin.settings.weekStart);
-    const plan = await this.loadPlanForWeek(this.weekStart);
-    this.renderHeaderMeta(view, plan);
-    this.renderMonthTheme(view, plan);
-    this.renderRoutineActions(view, plan);
-    await this.renderRoles(view, plan);
-    await this.renderActionPlans(view, plan);
-    this.renderReflection(view, plan);
-    this.renderDailyMemos(view, plan);
-    this.updateWeekMeta();
-    prevButton.addEventListener("click", () => {
-      void this.changeWeek(-1);
-    });
-    todayButton.addEventListener("click", () => {
-      void this.resetToToday();
-    });
-    nextButton.addEventListener("click", () => {
-      void this.changeWeek(1);
-    });
-  }
-  resetViewState() {
-    this.weekLabelInput = null;
-    this.monthThemeInput = null;
-    this.routineRows = [];
-    this.roleSections = [];
-    this.actionPlanRows = [];
-    this.reflectionGoodInputs = [];
-    this.reflectionIssueInputs = [];
-    this.memoInputs.clear();
-    this.dayDateLabels.clear();
-    if (this.saveTimer) {
-      window.clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-  }
-  async changeWeek(delta) {
-    await this.savePlan();
-    this.weekOffset += delta;
-    await this.renderWeek();
-  }
-  async resetToToday() {
-    await this.savePlan();
-    this.weekOffset = 0;
-    await this.renderWeek();
-  }
-  renderHeaderMeta(container, plan) {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-top" });
-    const meta = section.createEl("div", { cls: "lifeplanner-weekly-goals" });
-    const header = meta.createEl("div", { cls: "lifeplanner-weekly-section-header" });
-    header.createEl("h3", { text: "\u9031\u8868\u793A" });
-    const weekLabel = header.createEl("input", { type: "text" });
-    weekLabel.placeholder = "2026\u5E74 1\u6708 \u7B2C3\u9031";
-    weekLabel.value = plan.weekLabel ?? "";
-    weekLabel.readOnly = true;
-    this.weekLabelInput = weekLabel;
-  }
-  renderMonthTheme(container, plan) {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    section.createEl("h3", { text: "\u4ECA\u6708\u306E\u30C6\u30FC\u30DE" });
-    const input = section.createEl("textarea");
-    input.placeholder = "\u4ECA\u6708\u306E\u30C6\u30FC\u30DE";
-    input.rows = 2;
-    input.value = plan.monthTheme ?? "";
-    input.addEventListener("input", () => {
-      this.autoResize(input);
-      this.scheduleSave();
-    });
-    this.autoResize(input);
-    this.monthThemeInput = input;
-  }
-  renderRoutineActions(container, plan) {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
-    header.createEl("h3", { text: "\u30EB\u30FC\u30C6\u30A3\u30F3\u884C\u52D5" });
-    const addButton = header.createEl("button", { text: "\u8FFD\u52A0" });
-    const table = section.createEl("div", { cls: "lifeplanner-routine-table" });
-    const headerRow = table.createEl("div", { cls: "lifeplanner-routine-row is-header" });
-    headerRow.createEl("div", { text: "\u884C\u52D5" });
-    const routineDays = ROUTINE_DAYS3;
-    routineDays.forEach((day) => {
-      headerRow.createEl("div", { text: day });
-    });
-    const addRow = (title, checks) => {
-      const row = table.createEl("div", { cls: "lifeplanner-routine-row" });
-      const titleInput = row.createEl("input", { type: "text" });
-      titleInput.value = title;
-      titleInput.placeholder = "\u30EB\u30FC\u30C6\u30A3\u30F3";
-      titleInput.addEventListener("input", () => this.scheduleSave());
-      const checksMap = /* @__PURE__ */ new Map();
-      routineDays.forEach((day) => {
-        const cell = row.createEl("div");
-        const checkbox = cell.createEl("input", { type: "checkbox" });
-        checkbox.checked = Boolean(checks[day]);
-        checkbox.addEventListener("change", () => this.scheduleSave());
-        checksMap.set(day, checkbox);
-      });
-      const remove = row.createEl("button", { text: "\xD7" });
-      remove.addEventListener("click", (event) => {
-        event.preventDefault();
-        row.remove();
-        this.routineRows = this.routineRows.filter((item) => item.titleInput !== titleInput);
-        this.scheduleSave();
-      });
-      this.routineRows.push({ titleInput, checks: checksMap });
-    };
-    addButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      addRow("", {});
-      this.scheduleSave();
-    });
-    if (plan.routineActions.length === 0) {
-      addRow("", {});
-    } else {
-      plan.routineActions.forEach((action) => addRow(action.title, action.checks));
-    }
-  }
-  async renderRoles(container, plan) {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
-    header.createEl("h3", { text: "\u5F79\u5272\u3068\u91CD\u70B9\u30BF\u30B9\u30AF" });
-    const addRoleButton = header.createEl("button", { text: "\u5F79\u5272\u3092\u8FFD\u52A0" });
-    const rolesWrap = section.createEl("div", { cls: "lifeplanner-roles" });
-    const shared = await this.loadShared();
-    const sharedRoles = shared.roles.length > 0 ? shared.roles : plan.roles.map((role) => role.role);
-    const addRole = (roleName, goals) => {
-      const roleCard = rolesWrap.createEl("div", { cls: "lifeplanner-role-card" });
-      const roleHeader = roleCard.createEl("div", { cls: "lifeplanner-role-header" });
-      const roleInput = roleHeader.createEl("input", { type: "text" });
-      roleInput.placeholder = "\u5F79\u5272\u540D";
-      roleInput.value = roleName;
-      roleInput.addEventListener("input", () => this.scheduleSave());
-      const removeRole = roleHeader.createEl("button", { text: "\xD7" });
-      const goalsWrap = roleCard.createEl("div", { cls: "lifeplanner-weekly-list" });
-      const actions = roleCard.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
-      const addGoalButton = actions.createEl("button", { text: "\u76EE\u6A19\u3092\u8FFD\u52A0" });
-      const goalInputs = [];
-      const addGoal = (goalValue) => {
-        const row = goalsWrap.createEl("div", { cls: "lifeplanner-weekly-list-row" });
-        const input = row.createEl("input", { type: "text" });
-        input.placeholder = "\u76EE\u6A19";
-        input.value = goalValue;
-        input.addEventListener("input", () => this.scheduleSave());
-        const remove = row.createEl("button", { text: "\xD7" });
-        remove.addEventListener("click", (event) => {
-          event.preventDefault();
-          row.remove();
-          const index = goalInputs.indexOf(input);
-          if (index >= 0) {
-            goalInputs.splice(index, 1);
-          }
-          this.scheduleSave();
-        });
-        goalInputs.push(input);
-      };
-      addGoalButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        addGoal("");
-        this.scheduleSave();
-      });
-      removeRole.addEventListener("click", (event) => {
-        event.preventDefault();
-        roleCard.remove();
-        this.roleSections = this.roleSections.filter((item) => item.roleInput !== roleInput);
-        this.scheduleSave();
-      });
-      if (goals.length === 0) {
-        addGoal("");
-      } else {
-        goals.forEach((goal) => addGoal(goal));
-      }
-      this.roleSections.push({ roleInput, goalInputs });
-    };
-    addRoleButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      addRole("\u65B0\u3057\u3044\u5F79\u5272", []);
-      this.scheduleSave();
-    });
-    if (sharedRoles.length === 0) {
-      addRole("\u5F79\u52721", []);
-    } else {
-      sharedRoles.forEach((roleName) => {
-        const planRole = plan.roles.find((role) => role.role === roleName);
-        addRole(roleName, planRole?.goals ?? []);
-      });
-    }
-  }
-  async renderActionPlans(container, plan) {
-    const section = container.createEl("div", {
-      cls: "lifeplanner-weekly-section lifeplanner-action-plan-section"
-    });
-    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
-    header.createEl("h3", { text: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3" });
-    const addButton = header.createEl("button", { text: "\u8FFD\u52A0" });
-    section.createEl("div", {
-      cls: "lifeplanner-action-plan-hint",
-      text: "\u76EE\u6A19/\u30BF\u30B9\u30AF\u304B\u3089\u9078\u3093\u3067\u9031\u9593\u8A08\u753B\u306B\u7D10\u3065\u3051\u307E\u3059\u3002"
-    });
-    const list = section.createEl("div", { cls: "lifeplanner-weekly-list lifeplanner-action-plan-list" });
-    this.actionPlanRows = [];
-    const tasks = await this.tasksService.listTasks();
-    const goalsService = new GoalsService(
-      new MarkdownRepository(this.plugin.app),
-      this.plugin.settings.storageDir,
-      this.plugin.settings.defaultTags
-    );
-    const goals = await goalsService.listGoals();
-    const minLevelIndex = LEVELS2.indexOf(this.plugin.settings.actionPlanMinLevel);
-    const goalLevelMap = /* @__PURE__ */ new Map();
-    const goalTitleMap = /* @__PURE__ */ new Map();
-    goals.forEach((goal) => {
-      const levelIndex = LEVELS2.indexOf(goal.level);
-      if (levelIndex >= minLevelIndex) {
-        goalLevelMap.set(goal.id, goal.level);
-        goalLevelMap.set(goal.title, goal.level);
-      }
-      goalTitleMap.set(goal.id, goal.title);
-      goalTitleMap.set(goal.title, goal.title);
-    });
-    const options = tasks.filter((task) => {
-      const level = goalLevelMap.get(task.goalId);
-      if (!level) {
-        return true;
-      }
-      const levelIndex = LEVELS2.indexOf(level);
-      return levelIndex >= minLevelIndex;
-    }).map((task) => {
-      const level = goalLevelMap.get(task.goalId);
-      const goalTitle = goalTitleMap.get(task.goalId) ?? task.goalId;
-      const value = `${task.goalId} / ${task.title}`;
-      const label = level ? `\u3010${level}\u3011${goalTitle} / ${task.title}` : `${goalTitle} / ${task.title}`;
-      return { value, label };
-    });
-    const addRow = (value, done) => {
-      const row = list.createEl("div", { cls: "lifeplanner-action-plan-row" });
-      const checkbox = row.createEl("input", {
-        type: "checkbox",
-        cls: "lifeplanner-action-plan-checkbox"
-      });
-      checkbox.checked = done;
-      checkbox.addEventListener("change", () => this.scheduleSave());
-      const select = row.createEl("select", { cls: "lifeplanner-action-plan-select" });
-      const placeholder = select.createEl("option", { text: "\u9078\u629E", value: "" });
-      placeholder.disabled = true;
-      placeholder.selected = !value;
-      options.forEach((option) => {
-        select.createEl("option", { text: option.label, value: option.value });
-      });
-      const optionValues = options.map((option) => option.value);
-      if (value && !optionValues.includes(value)) {
-        const goalId = value.split(" / ")[0];
-        const existingLevel = goalLevelMap.get(goalId);
-        const goalTitle = goalTitleMap.get(goalId) ?? goalId;
-        const label = existingLevel ? `\u3010${existingLevel}\u3011${goalTitle} / ${value.split(" / ")[1] ?? ""}` : value;
-        select.createEl("option", { text: label, value });
-      }
-      select.value = value;
-      select.addEventListener("change", () => this.scheduleSave());
-      const remove = row.createEl("button", { text: "\xD7", cls: "lifeplanner-action-plan-remove" });
-      remove.addEventListener("click", (event) => {
-        event.preventDefault();
-        row.remove();
-        this.actionPlanRows = this.actionPlanRows.filter((item) => item.select !== select);
-        this.scheduleSave();
-      });
-      this.actionPlanRows.push({ select, checkbox });
-    };
-    const actions = section.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
-    actions.appendChild(addButton);
-    addButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      addRow("", false);
-      this.scheduleSave();
-    });
-    if (plan.actionPlans.length === 0) {
-      addRow("", false);
-    } else {
-      plan.actionPlans.forEach((item) => addRow(item.title, item.done));
-    }
-  }
-  renderReflection(container, plan) {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    section.createEl("h3", { text: "\u4ECA\u9031\u306E\u632F\u308A\u8FD4\u308A" });
-    const grid = section.createEl("div", { cls: "lifeplanner-weekly-reflection" });
-    const goodWrap = grid.createEl("div", { cls: "lifeplanner-weekly-reflection-card" });
-    goodWrap.createEl("h4", { text: "\u826F\u304B\u3063\u305F\u3053\u3068" });
-    const goodList = goodWrap.createEl("div", { cls: "lifeplanner-weekly-list" });
-    const goodActions = goodWrap.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
-    const addGood = goodActions.createEl("button", { text: "\u8FFD\u52A0" });
-    const issueWrap = grid.createEl("div", { cls: "lifeplanner-weekly-reflection-card" });
-    issueWrap.createEl("h4", { text: "\u8AB2\u984C" });
-    const issueList = issueWrap.createEl("div", { cls: "lifeplanner-weekly-list" });
-    const issueActions = issueWrap.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
-    const addIssue = issueActions.createEl("button", { text: "\u8FFD\u52A0" });
-    addGood.addEventListener("click", (event) => {
-      event.preventDefault();
-      this.addReflectionItem(goodList, this.reflectionGoodInputs, "\u632F\u308A\u8FD4\u308A");
-      this.scheduleSave();
-    });
-    addIssue.addEventListener("click", (event) => {
-      event.preventDefault();
-      this.addReflectionItem(issueList, this.reflectionIssueInputs, "\u8AB2\u984C");
-      this.scheduleSave();
-    });
-    if (plan.reflectionGood.length === 0) {
-      this.addReflectionItem(goodList, this.reflectionGoodInputs, "\u632F\u308A\u8FD4\u308A");
-    } else {
-      plan.reflectionGood.forEach(
-        (item) => this.addReflectionItem(goodList, this.reflectionGoodInputs, "\u632F\u308A\u8FD4\u308A", item)
-      );
-    }
-    if (plan.reflectionIssues.length === 0) {
-      this.addReflectionItem(issueList, this.reflectionIssueInputs, "\u8AB2\u984C");
-    } else {
-      plan.reflectionIssues.forEach(
-        (item) => this.addReflectionItem(issueList, this.reflectionIssueInputs, "\u8AB2\u984C", item)
-      );
-    }
-  }
-  addReflectionItem(container, inputs, placeholder, value = "") {
-    const row = container.createEl("div", { cls: "lifeplanner-weekly-list-row" });
-    const input = row.createEl("input", { type: "text" });
-    input.placeholder = placeholder;
-    input.value = value;
-    input.addEventListener("input", () => this.scheduleSave());
-    const remove = row.createEl("button", { text: "\xD7" });
-    remove.addEventListener("click", (event) => {
-      event.preventDefault();
-      row.remove();
-      const index = inputs.indexOf(input);
-      if (index >= 0) {
-        inputs.splice(index, 1);
-      }
-      this.scheduleSave();
-    });
-    inputs.push(input);
-  }
-  renderDailyMemos(container, plan) {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    section.createEl("h3", { text: "\u65E5\u4ED8\u3054\u3068\u306E\u4E00\u8A00\u30E1\u30E2\u6B04" });
-    const grid = section.createEl("div", { cls: "lifeplanner-daily-memos" });
-    for (const day of this.dayOrder) {
-      const card = grid.createEl("div", { cls: "lifeplanner-daily-memo-card" });
-      this.dailyMemoCards.set(day, card);
-      const header = card.createEl("div", { cls: "lifeplanner-daily-memo-header" });
-      header.createEl("h4", { text: day });
-      const dateLabel = header.createEl("span", { cls: "lifeplanner-daily-memo-date" });
-      this.dayDateLabels.set(day, dateLabel);
-      const list = card.createEl("div", { cls: "lifeplanner-weekly-list" });
-      const actions = card.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
-      const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
-      const inputs = [];
-      this.memoInputs.set(day, inputs);
-      const addMemo = (value) => {
-        const row = list.createEl("div", { cls: "lifeplanner-weekly-list-row" });
-        const input = row.createEl("input", { type: "text" });
-        input.placeholder = "\u4ECA\u65E5\u306E\u4E00\u8A00";
-        input.value = value;
-        input.addEventListener("input", () => this.scheduleSave());
-        const remove = row.createEl("button", { text: "\xD7" });
-        remove.addEventListener("click", (event) => {
-          event.preventDefault();
-          row.remove();
-          const index = inputs.indexOf(input);
-          if (index >= 0) {
-            inputs.splice(index, 1);
-          }
-          this.scheduleSave();
-        });
-        inputs.push(input);
-      };
-      addButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        addMemo("");
-        this.scheduleSave();
-      });
-      const memos = plan.dailyMemos[day] ?? [];
-      memos.forEach((memo) => addMemo(memo));
-      addMemo("");
-    }
-  }
-  async loadPlanForWeek(weekStart) {
-    const path = resolveWeeklyPlanPath(weekStart, this.plugin.settings.storageDir);
-    this.currentWeekPath = path;
-    const content = await this.repository.read(path);
-    if (!content) {
-      const emptyPlan2 = this.buildEmptyPlan();
-      const shared = await this.loadShared();
-      emptyPlan2.weekLabel = formatWeekLabel(weekStart, this.plugin.settings.weekStart);
-      emptyPlan2.monthTheme = shared.monthThemes[getMonthKey(weekStart)] ?? "";
-      emptyPlan2.routineActions = shared.routineActions.map((action) => ({
-        title: action.title,
-        checks: { ...action.checks }
-      }));
-      emptyPlan2.roles = shared.roles.map((role) => ({
-        role,
-        goals: []
-      }));
-      const serialized = serializeWeeklyPlan(emptyPlan2, this.plugin.settings.defaultTags);
-      this.lastSavedContent = serialized;
-      await this.repository.write(path, serialized);
-      return emptyPlan2;
-    }
-    this.lastSavedContent = content;
-    return parseWeeklyPlan(content);
-  }
-  async loadShared() {
-    const path = resolveLifePlannerPath("Weekly Shared", this.plugin.settings.storageDir);
-    const content = await this.repository.read(path);
-    if (!content) {
-      const emptyShared = {
-        routineActions: [],
-        roles: [],
-        monthThemes: {}
-      };
-      await this.repository.write(
-        path,
-        serializeWeeklyShared(emptyShared, this.plugin.settings.defaultTags)
-      );
-      return emptyShared;
-    }
-    return parseWeeklyShared(content);
-  }
-  async saveShared(plan) {
-    const shared = await this.loadShared();
-    shared.routineActions = plan.routineActions.map((action) => ({
-      title: action.title,
-      checks: { ...action.checks }
-    }));
-    shared.roles = this.roleSections.map((role) => role.roleInput.value.trim()).filter((value) => value.length > 0);
-    shared.monthThemes[getMonthKey(this.weekStart)] = plan.monthTheme ?? "";
-    const path = resolveLifePlannerPath("Weekly Shared", this.plugin.settings.storageDir);
-    await this.repository.write(
-      path,
-      serializeWeeklyShared(shared, this.plugin.settings.defaultTags)
-    );
-  }
-  buildEmptyPlan() {
-    const slots = BASE_DAYS.map((day) => ({ day, entries: [] }));
-    return {
-      id: "weekly",
-      weekStart: "",
-      weekEnd: "",
-      weeklyGoals: [],
-      weekLabel: "",
-      monthTheme: "",
-      routineActions: [],
-      roles: [],
-      actionPlans: [],
-      reflectionGood: [],
-      reflectionIssues: [],
-      dailyMemos: { \u6708: [], \u706B: [], \u6C34: [], \u6728: [], \u91D1: [], \u571F: [], \u65E5: [] },
-      slots
-    };
-  }
-  async savePlan() {
-    const plan = this.buildEmptyPlan();
-    plan.weeklyGoals = [];
-    plan.weekLabel = this.weekLabelInput ? this.weekLabelInput.value.trim() : "";
-    plan.monthTheme = this.monthThemeInput ? this.monthThemeInput.value.trim() : "";
-    plan.routineActions = this.routineRows.map((row) => {
-      const title = row.titleInput.value.trim();
-      const checks = {};
-      row.checks.forEach((checkbox, day) => {
-        checks[day] = checkbox.checked;
-      });
-      return { title, checks };
-    }).filter((row) => row.title.length > 0);
-    plan.roles = this.roleSections.map((role) => ({
-      role: role.roleInput.value.trim(),
-      goals: role.goalInputs.map((input) => input.value.trim()).filter((value) => value.length > 0)
-    })).filter((role) => role.role.length > 0);
-    plan.actionPlans = this.actionPlanRows.map((row) => ({
-      title: row.select.value.trim(),
-      done: row.checkbox.checked
-    })).filter((item) => item.title.length > 0);
-    plan.reflectionGood = this.reflectionGoodInputs.map((input) => input.value.trim()).filter((value) => value.length > 0);
-    plan.reflectionIssues = this.reflectionIssueInputs.map((input) => input.value.trim()).filter((value) => value.length > 0);
-    for (const day of BASE_DAYS) {
-      const inputs = this.memoInputs.get(day) ?? [];
-      plan.dailyMemos[day] = inputs.map((input) => input.value.trim()).filter((value) => value.length > 0);
-      const slot = plan.slots.find((entry) => entry.day === day);
-      if (slot) {
-        const dateLabel = this.dayDateLabels.get(day);
-        slot.dateLabel = dateLabel ? dateLabel.textContent ?? "" : "";
-      }
-    }
-    const serialized = serializeWeeklyPlan(plan, this.plugin.settings.defaultTags);
-    if (serialized === this.lastSavedContent) {
-      this.setStatus("\u5909\u66F4\u306F\u3042\u308A\u307E\u305B\u3093");
-      return;
-    }
-    await this.repository.write(this.currentWeekPath, serialized);
-    this.lastSavedContent = serialized;
-    await this.saveShared(plan);
-    this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
-  }
-  setStatus(message) {
-    if (!this.statusEl) {
-      return;
-    }
-    this.statusEl.setText(message);
-    window.setTimeout(() => {
-      this.statusEl?.setText("");
-    }, 2e3);
-  }
-  scheduleSave() {
-    if (this.saveTimer) {
-      window.clearTimeout(this.saveTimer);
-    }
-    this.saveTimer = window.setTimeout(() => {
-      void this.savePlan();
-    }, 500);
-  }
-  updateWeekMeta() {
-    this.weekStart = computeWeekStart2(/* @__PURE__ */ new Date(), this.weekOffset, this.plugin.settings.weekStart);
-    const weekLabel = formatWeekLabel(this.weekStart, this.plugin.settings.weekStart);
-    if (this.weekLabelInput) {
-      this.weekLabelInput.value = weekLabel;
-    }
-    this.dayOrder.forEach((day, index) => {
-      const date = new Date(this.weekStart);
-      date.setDate(this.weekStart.getDate() + index);
-      const label = this.dayDateLabels.get(day);
-      if (label) {
-        label.setText(formatFullDate(date));
-      }
-      const card = this.dailyMemoCards.get(day);
-      if (card) {
-        card.classList.toggle("is-today", isSameDay(date, /* @__PURE__ */ new Date()));
-      }
-    });
-  }
-  autoResize(textarea) {
+  autoResizeTextarea(textarea) {
     textarea.style.height = "auto";
     textarea.style.height = `${textarea.scrollHeight}px`;
   }
+  setStatus(message) {
+    if (!this.statusEl) {
+      return;
+    }
+    this.statusEl.setText(message);
+    window.setTimeout(() => {
+      this.statusEl?.setText("");
+    }, 2e3);
+  }
 };
-function computeWeekStart2(today, offset, weekStart) {
-  const base = new Date(today);
-  base.setDate(base.getDate() + offset * 7);
-  const day = base.getDay();
-  const startIndex = weekStart === "sunday" ? 0 : 1;
-  const diff = (day - startIndex + 7) % 7;
-  const start = new Date(base);
-  start.setDate(base.getDate() - diff);
-  return start;
-}
-function formatWeekLabel(weekStart, weekStartSetting) {
-  const year = weekStart.getFullYear();
-  const month = weekStart.getMonth() + 1;
-  const weekNumber = weekOfMonth(weekStart, weekStartSetting);
-  return `${year}\u5E74 ${month}\u6708 \u7B2C${weekNumber}\u9031`;
-}
-function weekOfMonth(date, weekStartSetting) {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const firstOfMonth = new Date(year, month, 1);
-  const firstDay = firstOfMonth.getDay();
-  const firstWeekStart = new Date(firstOfMonth);
-  const startIndex = weekStartSetting === "sunday" ? 0 : 1;
-  const offset = (firstDay - startIndex + 7) % 7;
-  firstWeekStart.setDate(firstOfMonth.getDate() - offset);
-  const diffMs = date.getTime() - firstWeekStart.getTime();
-  return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1e3)) + 1;
-}
-function getMonthKey(date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  return `${year}-${month}`;
-}
-function formatFullDate(date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}/${month}/${day}`;
-}
-function isSameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-function dayOrder(weekStart) {
-  return weekStart === "sunday" ? ["\u65E5", "\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"] : BASE_DAYS;
-}
 
 // src/settings.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
+var DASHBOARD_SECTION_TYPES = NAV_GROUPS.flatMap(
+  (group) => group.items.map((item) => item.viewType)
+).filter((viewType) => viewType !== DASHBOARD_VIEW_TYPE);
+var DEFAULT_DASHBOARD_SECTIONS = [
+  INBOX_VIEW_TYPE,
+  WEEKLY_PLAN_VIEW_TYPE
+];
 var DEFAULT_SETTINGS = {
   weekStart: "monday",
   storageDir: "LifePlanner",
   kanbanColumns: ["Backlog", "Todo", "Doing", "Done"],
   actionPlanMinLevel: "\u6708\u9593",
-  defaultTags: ["lifeplanner"]
+  defaultTags: ["lifeplanner"],
+  hiddenTabs: [],
+  dashboardSections: DEFAULT_DASHBOARD_SECTIONS,
+  showDashboardCalendar: true
 };
-var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
+var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -3771,13 +5272,14 @@ var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian10.Setting(containerEl).setName("Week start").setDesc("Weekly filenames use the start date of the week.").addDropdown((dropdown) => {
-      dropdown.addOption("monday", "Monday").addOption("sunday", "Sunday").setValue(this.plugin.settings.weekStart).onChange(async (value) => {
+    containerEl.createEl("h3", { text: "\u57FA\u672C\u8A2D\u5B9A" });
+    new import_obsidian11.Setting(containerEl).setName("\u9031\u306E\u958B\u59CB\u66DC\u65E5").setDesc("\u9031\u9593\u30D5\u30A1\u30A4\u30EB\u306E\u65E5\u4ED8\u8A08\u7B97\u306B\u4F7F\u7528\u3059\u308B\u958B\u59CB\u66DC\u65E5\u3067\u3059\u3002").addDropdown((dropdown) => {
+      dropdown.addOption("monday", "\u6708\u66DC\u59CB\u307E\u308A").addOption("sunday", "\u65E5\u66DC\u59CB\u307E\u308A").setValue(this.plugin.settings.weekStart).onChange(async (value) => {
         this.plugin.settings.weekStart = value;
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian10.Setting(containerEl).setName("Storage folder").setDesc("Folder path in your vault for LifePlanner files.").addText((input) => {
+    new import_obsidian11.Setting(containerEl).setName("\u4FDD\u5B58\u30D5\u30A9\u30EB\u30C0").setDesc("LifePlanner\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u4FDD\u5B58\u3059\u308B\u30D5\u30A9\u30EB\u30C0\u30D1\u30B9\u3067\u3059\u3002").addText((input) => {
       input.setPlaceholder("LifePlanner");
       input.setValue(this.plugin.settings.storageDir);
       input.onChange(async (value) => {
@@ -3785,7 +5287,7 @@ var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian10.Setting(containerEl).setName("Kanban columns").setDesc("Comma-separated column names for the Issues board.").addTextArea((input) => {
+    new import_obsidian11.Setting(containerEl).setName("\u30A4\u30B7\u30E5\u30FC\u306E\u30AB\u30E9\u30E0").setDesc("\u30AB\u30F3\u30DE\u533A\u5207\u308A\u3067\u30AB\u30E9\u30E0\u540D\u3092\u8A2D\u5B9A\u3057\u307E\u3059\u3002").addTextArea((input) => {
       input.setValue(this.plugin.settings.kanbanColumns.join(", "));
       input.onChange(async (value) => {
         const columns = value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
@@ -3793,7 +5295,7 @@ var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian10.Setting(containerEl).setName("Default tags").setDesc("Comma-separated tags applied to LifePlanner files. Leave blank for none.").addText((input) => {
+    new import_obsidian11.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u30BF\u30B0").setDesc("LifePlanner\u3067\u4F5C\u6210/\u66F4\u65B0\u3059\u308BMarkdown\u306B\u4ED8\u4E0E\u3057\u307E\u3059\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09\u3002").addText((input) => {
       input.setPlaceholder("lifeplanner");
       input.setValue(this.plugin.settings.defaultTags.join(", "));
       input.onChange(async (value) => {
@@ -3802,7 +5304,7 @@ var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian10.Setting(containerEl).setName("Action plan minimum level").setDesc("Show goals at or below this level in Action Plan candidates.").addDropdown((dropdown) => {
+    new import_obsidian11.Setting(containerEl).setName("\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3\u306E\u6700\u5C0F\u968E\u5C64").setDesc("\u3053\u306E\u968E\u5C64\u4EE5\u4E0B\u306E\u76EE\u6A19\u3092\u5019\u88DC\u306B\u8868\u793A\u3057\u307E\u3059\u3002").addDropdown((dropdown) => {
       ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"].forEach((level) => {
         dropdown.addOption(level, level);
       });
@@ -3812,11 +5314,38 @@ var LifePlannerSettingTab = class extends import_obsidian10.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
+    containerEl.createEl("h3", { text: "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9" });
+    new import_obsidian11.Setting(containerEl).setName("\u30DF\u30CB\u30AB\u30EC\u30F3\u30C0\u30FC\u8868\u793A").setDesc("\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9\u306B\u6708\u9593\u30AB\u30EC\u30F3\u30C0\u30FC\u3092\u8868\u793A\u3057\u307E\u3059\u3002").addToggle((toggle) => {
+      toggle.setValue(this.plugin.settings.showDashboardCalendar);
+      toggle.onChange(async (value) => {
+        this.plugin.settings.showDashboardCalendar = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    containerEl.createEl("h3", { text: "\u30BF\u30D6\u8868\u793A" });
+    NAV_GROUPS.forEach((group) => {
+      containerEl.createEl("h4", { text: group.label });
+      group.items.forEach((item) => {
+        new import_obsidian11.Setting(containerEl).setName(item.label).setDesc("\u8868\u793A/\u975E\u8868\u793A").addToggle((toggle) => {
+          toggle.setValue(!this.plugin.settings.hiddenTabs.includes(item.viewType));
+          toggle.onChange(async (value) => {
+            const hidden = new Set(this.plugin.settings.hiddenTabs);
+            if (value) {
+              hidden.delete(item.viewType);
+            } else {
+              hidden.add(item.viewType);
+            }
+            this.plugin.settings.hiddenTabs = Array.from(hidden);
+            await this.plugin.saveSettings();
+          });
+        });
+      });
+    });
   }
 };
 
 // src/main.ts
-var LifePlannerPlugin = class extends import_obsidian11.Plugin {
+var LifePlannerPlugin = class extends import_obsidian12.Plugin {
   constructor() {
     super(...arguments);
     this.primaryLeaf = null;
@@ -3824,6 +5353,7 @@ var LifePlannerPlugin = class extends import_obsidian11.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this));
     this.registerView(WEEKLY_PLAN_VIEW_TYPE, (leaf) => new WeeklyPlanView(leaf, this));
     this.registerView(INBOX_VIEW_TYPE, (leaf) => new InboxView(leaf, this));
     this.registerView(GOALS_VIEW_TYPE, (leaf) => new GoalsView(leaf, this));
@@ -3837,31 +5367,37 @@ var LifePlannerPlugin = class extends import_obsidian11.Plugin {
     this.registerView(
       VALUES_VIEW_TYPE,
       (leaf) => new TableSectionView(leaf, this, VALUES_VIEW_TYPE, "Values", "\u4FA1\u5024\u89B3", [
-        { label: "\u4FA1\u5024\u89B3", type: "text", width: "140px" },
-        { label: "\u8AAC\u660E\u6587", type: "text", width: "minmax(260px, 1fr)" }
+        { label: "\u4FA1\u5024\u89B3", type: "text", width: "minmax(160px, 1.2fr)" },
+        { label: "\u8AAC\u660E\u6587", type: "text", width: "minmax(220px, 2.8fr)", multiline: true }
       ])
     );
     this.registerView(
       HAVE_DO_BE_VIEW_TYPE,
       (leaf) => new TableSectionView(leaf, this, HAVE_DO_BE_VIEW_TYPE, "Have Do Be", "Have / Do / Be", [
-        { label: "\u7A2E\u5225", type: "select", options: ["Have", "Do", "Be"], width: "120px" },
-        { label: "\u4F55\uFF1F", type: "text", width: "minmax(260px, 1fr)" }
+        {
+          label: "\u7A2E\u5225",
+          type: "select",
+          options: ["Have", "Do", "Be"],
+          width: "minmax(80px, 140px)"
+        },
+        { label: "\u5185\u5BB9", type: "text", width: "minmax(0, 1fr)", multiline: true }
       ])
     );
     this.registerView(
       PROMISE_VIEW_TYPE,
       (leaf) => new TableSectionView(leaf, this, PROMISE_VIEW_TYPE, "Promise", "\u7D04\u675F", [
         { label: "\u51E6\u7406", type: "checkbox", width: "56px" },
-        { label: "\u8AB0\u3068", type: "text", width: "140px" },
-        { label: "\u4F55\u3092\uFF1F", type: "text", width: "minmax(260px, 1fr)" }
+        { label: "\u8AB0\u3068", type: "text", width: "minmax(0, 1fr)" },
+        { label: "\u4F55\u3092\uFF1F", type: "text", width: "minmax(0, 2fr)", multiline: true }
       ])
     );
     this.addSettingTab(new LifePlannerSettingTab(this.app, this));
     this.addRibbonIcon("calendar", "LifePlanner", () => {
-      void this.openView(WEEKLY_PLAN_VIEW_TYPE);
+      void this.openView(DASHBOARD_VIEW_TYPE);
     });
   }
   onunload() {
+    this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(WEEKLY_PLAN_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(INBOX_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(GOALS_VIEW_TYPE);
@@ -3887,7 +5423,20 @@ var LifePlannerPlugin = class extends import_obsidian11.Plugin {
     await leaf.setViewState({ type: viewType, active: true });
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = await this.loadData();
+    const merged = Object.assign({}, DEFAULT_SETTINGS, data);
+    if (typeof data?.showMonthlyCalendar === "boolean" && typeof data?.showDashboardCalendar !== "boolean") {
+      merged.showDashboardCalendar = data.showMonthlyCalendar;
+    }
+    if (!Array.isArray(data?.dashboardSections)) {
+      merged.dashboardSections = [...DEFAULT_SETTINGS.dashboardSections];
+    } else {
+      const allowed = new Set(DASHBOARD_SECTION_TYPES);
+      const filtered = data.dashboardSections.filter((viewType) => allowed.has(viewType));
+      const hasCustom = filtered.length > 0 || data.dashboardSections.length === 0;
+      merged.dashboardSections = hasCustom ? filtered : [...DEFAULT_SETTINGS.dashboardSections];
+    }
+    this.settings = merged;
   }
   async saveSettings() {
     await this.saveData(this.settings);

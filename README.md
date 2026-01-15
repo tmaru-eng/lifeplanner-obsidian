@@ -11,6 +11,7 @@
 - Inbox / Issues / 演習シート
 - 日常/内省の2段タブナビ
 - デフォルトタグ設定（frontmatter tags）
+- タブ表示のカスタマイズ
 - Obsidianサイドバーアイコンから起動
 
 ## Usage

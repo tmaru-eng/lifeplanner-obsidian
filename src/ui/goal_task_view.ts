@@ -3,6 +3,7 @@ import { GoalsService } from "../services/goals_service";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { TasksService } from "../services/tasks_service";
 import type LifePlannerPlugin from "../main";
+import { attachDeleteMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { GOAL_TASK_VIEW_TYPE } from "./view_types";
 export { GOAL_TASK_VIEW_TYPE };
@@ -13,6 +14,8 @@ export class GoalTaskView extends ItemView {
   private tasksService: TasksService;
   private listEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
+  private viewEl: HTMLElement | null = null;
+  private disposeMenuClose: (() => void) | null = null;
   private taskRows: {
     checkbox: HTMLInputElement;
     goalSelect: HTMLSelectElement;
@@ -50,10 +53,13 @@ export class GoalTaskView extends ItemView {
     container.empty();
 
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
+    this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: "アクションプラン" });
     renderNavigation(view, GOAL_TASK_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
 
     this.statusEl = view.createEl("div", { cls: "lifeplanner-goal-task-status" });
     const section = view.createEl("div", {
@@ -69,18 +75,32 @@ export class GoalTaskView extends ItemView {
     this.listEl = section.createEl("div", {
       cls: "lifeplanner-weekly-list lifeplanner-action-plan-list",
     });
+    const hiddenWrap = section.createEl("div", { cls: "lifeplanner-action-plan-hidden" });
+    const hiddenHeader = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-action-plan-hidden-header",
+    });
+    const hiddenToggle = hiddenHeader.createEl("button", { text: "非表示リスト" });
+    const hiddenList = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list is-hidden",
+    });
 
-    await this.renderTasks();
+    const listContext = await this.renderTasks(this.listEl, hiddenList, hiddenWrap, hiddenToggle);
 
     addButton.addEventListener("click", (event) => {
       event.preventDefault();
-      this.addTaskRow(this.goalOptions);
+      if (!listContext) {
+        return;
+      }
+      this.addTaskRow(this.goalOptions, listContext);
     });
   }
 
   async onClose(): Promise<void> {
     this.listEl = null;
     this.statusEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
     this.taskRows = [];
     if (this.saveTimer) {
       window.clearTimeout(this.saveTimer);
@@ -88,26 +108,71 @@ export class GoalTaskView extends ItemView {
     }
   }
 
-  private async renderTasks(): Promise<void> {
+  private async renderTasks(
+    activeList: HTMLElement,
+    hiddenList: HTMLElement,
+    hiddenWrap: HTMLElement,
+    hiddenToggle: HTMLButtonElement
+  ): Promise<{
+    activeList: HTMLElement;
+    hiddenList: HTMLElement;
+    updateHiddenCount: () => void;
+    moveRow: (row: HTMLElement, done: boolean) => void;
+  } | null> {
     if (!this.listEl) {
-      return;
+      return null;
     }
     this.listEl.empty();
+    hiddenList.empty();
     this.taskRows = [];
     const tasks = await this.tasksService.listTasks();
     const goals = await this.goalsService.listGoals();
     this.goalOptions = goals.map((goal) => ({ title: goal.title }));
+    let hiddenOpen = false;
+    const setHiddenOpen = (open: boolean): void => {
+      hiddenOpen = open;
+      hiddenList.classList.toggle("is-hidden", !hiddenOpen);
+    };
+    const updateHiddenCount = (): void => {
+      const count = hiddenList.querySelectorAll(".lifeplanner-action-plan-row").length;
+      hiddenToggle.setText(`非表示リスト (${count})`);
+      hiddenWrap.classList.toggle("is-empty", count === 0);
+      if (count === 0) {
+        setHiddenOpen(false);
+      }
+    };
+    const moveRow = (row: HTMLElement, done: boolean): void => {
+      const target = done ? hiddenList : activeList;
+      if (row.parentElement !== target) {
+        target.appendChild(row);
+      }
+      updateHiddenCount();
+    };
+    hiddenToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      setHiddenOpen(!hiddenOpen);
+    });
     if (tasks.length === 0) {
-      this.addTaskRow(this.goalOptions);
-      return;
+      const context = { activeList, hiddenList, updateHiddenCount, moveRow };
+      this.addTaskRow(this.goalOptions, context);
+      updateHiddenCount();
+      return context;
     }
     for (const task of tasks) {
-      this.addTaskRow(this.goalOptions, task.goalId, task.title, task.status === "done");
+      this.addTaskRow(this.goalOptions, { activeList, hiddenList, updateHiddenCount, moveRow }, task.goalId, task.title, task.status === "done");
     }
+    updateHiddenCount();
+    return { activeList, hiddenList, updateHiddenCount, moveRow };
   }
 
   private addTaskRow(
-    goals?: { title: string }[],
+    goals: { title: string }[] | undefined,
+    context: {
+      activeList: HTMLElement;
+      hiddenList: HTMLElement;
+      updateHiddenCount: () => void;
+      moveRow: (row: HTMLElement, done: boolean) => void;
+    },
     goalId = "",
     title = "",
     done = false
@@ -115,7 +180,7 @@ export class GoalTaskView extends ItemView {
     if (!this.listEl) {
       return;
     }
-    const row = this.listEl.createEl("div", {
+    const row = context.activeList.createEl("div", {
       cls: "lifeplanner-action-plan-row lifeplanner-action-plan-task-row",
     });
     const checkbox = row.createEl("input", {
@@ -145,19 +210,23 @@ export class GoalTaskView extends ItemView {
     });
     input.placeholder = "タスク内容";
     input.value = title;
-    const remove = row.createEl("button", { text: "×", cls: "lifeplanner-action-plan-remove" });
+    const menuScope = this.viewEl ?? this.listEl ?? row;
 
     const onChange = () => this.scheduleSave();
-    checkbox.addEventListener("change", onChange);
+    checkbox.addEventListener("change", () => {
+      context.moveRow(row, checkbox.checked);
+      onChange();
+    });
     select.addEventListener("change", onChange);
     input.addEventListener("input", onChange);
-    remove.addEventListener("click", (event) => {
-      event.preventDefault();
+    attachDeleteMenu(row, menuScope, () => {
       row.remove();
       this.taskRows = this.taskRows.filter((item) => item.titleInput !== input);
+      context.updateHiddenCount();
       this.scheduleSave();
     });
     this.taskRows.push({ checkbox, goalSelect: select, titleInput: input });
+    context.moveRow(row, done);
   }
 
   private scheduleSave(): void {

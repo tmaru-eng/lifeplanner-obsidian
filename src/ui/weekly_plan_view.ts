@@ -1,29 +1,46 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
+import type { InboxItem } from "../models/inbox_item";
 import { ActionPlanItem, WeeklyPlan, WeeklyPlanSlot } from "../models/weekly_plan";
 import { GoalLevel } from "../models/goal";
 import { GoalsService } from "../services/goals_service";
 import { WeeklyShared } from "../models/weekly_shared";
+import { InboxService } from "../services/inbox_service";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { TasksService } from "../services/tasks_service";
 import { parseWeeklyPlan, serializeWeeklyPlan } from "../services/weekly_plan_io";
 import { parseWeeklyShared, serializeWeeklyShared } from "../services/weekly_shared_io";
 import { resolveLifePlannerPath, resolveWeeklyPlanPath } from "../storage/path_resolver";
 import type LifePlannerPlugin from "../main";
+import { attachDeleteMenu, attachRowMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
 import { renderNavigation } from "./navigation";
-import { WEEKLY_PLAN_VIEW_TYPE } from "./view_types";
+import { LifePlannerViewType, WEEKLY_PLAN_VIEW_TYPE } from "./view_types";
 export { WEEKLY_PLAN_VIEW_TYPE };
 
 const BASE_DAYS = ["月", "火", "水", "木", "金", "土", "日"];
 const ROUTINE_DAYS = ["月", "火", "水", "木", "金", "土"];
 const LEVELS: GoalLevel[] = ["人生", "長期", "中期", "年間", "四半期", "月間", "週間"];
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-export class WeeklyPlanView extends ItemView {
+export type WeeklyPlanRenderOptions = {
+  showNavigation?: boolean;
+  showHeader?: boolean;
+  attachMenuClose?: boolean;
+  onNavigate?: (viewType: LifePlannerViewType) => void;
+  hiddenViewTypes?: LifePlannerViewType[];
+};
+
+export class WeeklyPlanRenderer {
   private plugin: LifePlannerPlugin;
   private repository: MarkdownRepository;
   private tasksService: TasksService;
+  private inboxService: InboxService;
   private statusEl: HTMLElement | null = null;
   private rootEl: HTMLElement | null = null;
+  private viewEl: HTMLElement | null = null;
+  private disposeMenuClose: (() => void) | null = null;
   private lastSavedContent = "";
+  private loadedPlan: WeeklyPlan | null = null;
+  private renderOptions: WeeklyPlanRenderOptions = {};
   private weekLabelInput: HTMLInputElement | null = null;
   private monthThemeInput: HTMLTextAreaElement | null = null;
   private routineRows: {
@@ -40,17 +57,16 @@ export class WeeklyPlanView extends ItemView {
   }[] = [];
   private reflectionGoodInputs: HTMLInputElement[] = [];
   private reflectionIssueInputs: HTMLInputElement[] = [];
-  private memoInputs: Map<string, HTMLInputElement[]> = new Map();
   private dayDateLabels: Map<string, HTMLElement> = new Map();
   private dailyMemoCards: Map<string, HTMLElement> = new Map();
+  private tweetSaveTimers: Map<string, number> = new Map();
   private saveTimer: number | null = null;
   private weekOffset = 0;
   private weekStart = new Date();
   private currentWeekPath = "";
   private dayOrder: string[] = BASE_DAYS;
 
-  constructor(leaf: WorkspaceLeaf, plugin: LifePlannerPlugin) {
-    super(leaf);
+  constructor(plugin: LifePlannerPlugin) {
     this.plugin = plugin;
     this.repository = new MarkdownRepository(this.plugin.app);
     this.tasksService = new TasksService(
@@ -58,24 +74,24 @@ export class WeeklyPlanView extends ItemView {
       this.plugin.settings.storageDir,
       this.plugin.settings.defaultTags
     );
+    this.inboxService = new InboxService(
+      this.repository,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags
+    );
   }
 
-  getViewType(): string {
-    return WEEKLY_PLAN_VIEW_TYPE;
-  }
-
-  getDisplayText(): string {
-    return "週間計画";
-  }
-
-  async onOpen(): Promise<void> {
-    this.rootEl = this.contentEl;
-    await this.renderWeek();
+  async render(container: HTMLElement, options: WeeklyPlanRenderOptions = {}): Promise<void> {
+    this.rootEl = container;
+    await this.renderWeek(options);
   }
 
   async onClose(): Promise<void> {
     this.statusEl = null;
     this.rootEl = null;
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
     this.weekLabelInput = null;
     this.monthThemeInput = null;
     this.routineRows = [];
@@ -83,32 +99,51 @@ export class WeeklyPlanView extends ItemView {
     this.actionPlanRows = [];
     this.reflectionGoodInputs = [];
     this.reflectionIssueInputs = [];
-    this.memoInputs.clear();
     this.dayDateLabels.clear();
     this.dailyMemoCards.clear();
+    this.clearTweetSaveTimers();
     if (this.saveTimer) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
   }
 
-  private async renderWeek(): Promise<void> {
+  private async renderWeek(options: WeeklyPlanRenderOptions = {}): Promise<void> {
     if (!this.rootEl) {
       return;
     }
+    const resolvedOptions = {
+      showNavigation: options.showNavigation ?? true,
+      showHeader: options.showHeader ?? true,
+      attachMenuClose: options.attachMenuClose ?? true,
+      onNavigate: options.onNavigate,
+      hiddenViewTypes: options.hiddenViewTypes ?? [],
+    };
+    this.renderOptions = resolvedOptions;
     this.resetViewState();
     this.rootEl.empty();
     const view = this.rootEl.createEl("div", { cls: "lifeplanner-view" });
-    const header = view.createEl("div", { cls: "lifeplanner-weekly-header" });
-    header.createEl("h2", { text: "週間計画" });
-    const navButtons = header.createEl("div", { cls: "lifeplanner-weekly-nav" });
-    const prevButton = navButtons.createEl("button", { text: "◀ 前週" });
-    const todayButton = navButtons.createEl("button", { text: "今日" });
-    const nextButton = navButtons.createEl("button", { text: "次週 ▶" });
+    this.viewEl = view;
+    enableTapToBlur(view);
+    if (resolvedOptions.attachMenuClose) {
+      this.disposeMenuClose = registerRowMenuClose(view);
+    }
+    let prevButton: HTMLButtonElement | null = null;
+    let todayButton: HTMLButtonElement | null = null;
+    let nextButton: HTMLButtonElement | null = null;
+    if (resolvedOptions.showHeader) {
+      const header = view.createEl("div", { cls: "lifeplanner-weekly-header" });
+      header.createEl("h2", { text: "週間計画" });
+      const navButtons = header.createEl("div", { cls: "lifeplanner-weekly-nav" });
+      prevButton = navButtons.createEl("button", { text: "◀ 前週" });
+      todayButton = navButtons.createEl("button", { text: "今日" });
+      nextButton = navButtons.createEl("button", { text: "次週 ▶" });
+    }
 
-    renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    if (resolvedOptions.showNavigation) {
+      const onNavigate = resolvedOptions.onNavigate ?? (() => {});
+      renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, onNavigate, resolvedOptions.hiddenViewTypes);
+    }
 
     this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
 
@@ -120,19 +155,25 @@ export class WeeklyPlanView extends ItemView {
     this.renderRoutineActions(view, plan);
     await this.renderRoles(view, plan);
     await this.renderActionPlans(view, plan);
+    await this.renderDailyMemos(view);
     this.renderReflection(view, plan);
-    this.renderDailyMemos(view, plan);
     this.updateWeekMeta();
 
-    prevButton.addEventListener("click", () => {
-      void this.changeWeek(-1);
-    });
-    todayButton.addEventListener("click", () => {
-      void this.resetToToday();
-    });
-    nextButton.addEventListener("click", () => {
-      void this.changeWeek(1);
-    });
+    if (prevButton) {
+      prevButton.addEventListener("click", () => {
+        void this.changeWeek(-1);
+      });
+    }
+    if (todayButton) {
+      todayButton.addEventListener("click", () => {
+        void this.resetToToday();
+      });
+    }
+    if (nextButton) {
+      nextButton.addEventListener("click", () => {
+        void this.changeWeek(1);
+      });
+    }
   }
 
   private resetViewState(): void {
@@ -143,8 +184,11 @@ export class WeeklyPlanView extends ItemView {
     this.actionPlanRows = [];
     this.reflectionGoodInputs = [];
     this.reflectionIssueInputs = [];
-    this.memoInputs.clear();
     this.dayDateLabels.clear();
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
+    this.clearTweetSaveTimers();
     if (this.saveTimer) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
@@ -154,13 +198,13 @@ export class WeeklyPlanView extends ItemView {
   private async changeWeek(delta: number): Promise<void> {
     await this.savePlan();
     this.weekOffset += delta;
-    await this.renderWeek();
+    await this.renderWeek(this.renderOptions);
   }
 
   private async resetToToday(): Promise<void> {
     await this.savePlan();
     this.weekOffset = 0;
-    await this.renderWeek();
+    await this.renderWeek(this.renderOptions);
   }
 
   private renderHeaderMeta(container: HTMLElement, plan: WeeklyPlan): void {
@@ -176,17 +220,65 @@ export class WeeklyPlanView extends ItemView {
   }
 
   private renderMonthTheme(container: HTMLElement, plan: WeeklyPlan): void {
-    const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    section.createEl("h3", { text: "今月のテーマ" });
-    const input = section.createEl("textarea");
+    const section = container.createEl("div", {
+      cls: "lifeplanner-weekly-section lifeplanner-month-theme",
+    });
+    const header = section.createEl("div", { cls: "lifeplanner-weekly-section-header" });
+    header.createEl("h3", { text: "今月のテーマ" });
+    const menuScope = this.viewEl ?? section;
+    const body = section.createEl("div", { cls: "lifeplanner-month-theme-body" });
+    const display = body.createEl("div", { cls: "lifeplanner-month-theme-display" });
+    const input = body.createEl("textarea", { cls: "lifeplanner-month-theme-input" });
     input.placeholder = "今月のテーマ";
     input.rows = 2;
     input.value = plan.monthTheme ?? "";
+
+    const updateDisplay = (): void => {
+      const value = input.value.trim();
+      display.setText(value || "(未記入)");
+      display.classList.toggle("is-empty", value.length === 0);
+    };
+
+    const setEditMode = (editing: boolean): void => {
+      input.classList.toggle("lifeplanner-hidden", !editing);
+      display.classList.toggle("lifeplanner-hidden", editing);
+      if (editing) {
+        this.autoResize(input);
+        input.focus();
+      }
+    };
+
+    attachRowMenu(header, menuScope, [
+      {
+        label: "編集",
+        onSelect: () => {
+          setEditMode(true);
+        },
+      },
+      {
+        label: "削除",
+        onSelect: () => {
+          input.value = "";
+          updateDisplay();
+          setEditMode(false);
+          this.autoResize(input);
+          this.scheduleSave();
+        },
+      },
+    ]);
+
     input.addEventListener("input", () => {
+      updateDisplay();
       this.autoResize(input);
       this.scheduleSave();
     });
-    this.autoResize(input);
+    input.addEventListener("blur", () => {
+      updateDisplay();
+      setEditMode(false);
+    });
+
+    updateDisplay();
+    setEditMode(false);
     this.monthThemeInput = input;
   }
 
@@ -210,15 +302,15 @@ export class WeeklyPlanView extends ItemView {
       titleInput.addEventListener("input", () => this.scheduleSave());
       const checksMap = new Map<string, HTMLInputElement>();
       routineDays.forEach((day) => {
-        const cell = row.createEl("div");
+        const cell = row.createEl("div", { cls: "lifeplanner-routine-day" });
+        cell.setAttr("data-day", day);
         const checkbox = cell.createEl("input", { type: "checkbox" });
         checkbox.checked = Boolean(checks[day]);
         checkbox.addEventListener("change", () => this.scheduleSave());
         checksMap.set(day, checkbox);
       });
-      const remove = row.createEl("button", { text: "×" });
-      remove.addEventListener("click", (event) => {
-        event.preventDefault();
+      const menuScope = this.viewEl ?? row;
+      attachDeleteMenu(row, menuScope, () => {
         row.remove();
         this.routineRows = this.routineRows.filter((item) => item.titleInput !== titleInput);
         this.scheduleSave();
@@ -252,7 +344,6 @@ export class WeeklyPlanView extends ItemView {
       roleInput.placeholder = "役割名";
       roleInput.value = roleName;
       roleInput.addEventListener("input", () => this.scheduleSave());
-      const removeRole = roleHeader.createEl("button", { text: "×" });
       const goalsWrap = roleCard.createEl("div", { cls: "lifeplanner-weekly-list" });
       const actions = roleCard.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
       const addGoalButton = actions.createEl("button", { text: "目標を追加" });
@@ -263,9 +354,8 @@ export class WeeklyPlanView extends ItemView {
         input.placeholder = "目標";
         input.value = goalValue;
         input.addEventListener("input", () => this.scheduleSave());
-        const remove = row.createEl("button", { text: "×" });
-        remove.addEventListener("click", (event) => {
-          event.preventDefault();
+        const menuScope = this.viewEl ?? row;
+        attachDeleteMenu(row, menuScope, () => {
           row.remove();
           const index = goalInputs.indexOf(input);
           if (index >= 0) {
@@ -280,8 +370,8 @@ export class WeeklyPlanView extends ItemView {
         addGoal("");
         this.scheduleSave();
       });
-      removeRole.addEventListener("click", (event) => {
-        event.preventDefault();
+      const menuScope = this.viewEl ?? roleCard;
+      attachDeleteMenu(roleHeader, menuScope, () => {
         roleCard.remove();
         this.roleSections = this.roleSections.filter((item) => item.roleInput !== roleInput);
         this.scheduleSave();
@@ -319,7 +409,17 @@ export class WeeklyPlanView extends ItemView {
       cls: "lifeplanner-action-plan-hint",
       text: "目標/タスクから選んで週間計画に紐づけます。",
     });
-    const list = section.createEl("div", { cls: "lifeplanner-weekly-list lifeplanner-action-plan-list" });
+    const list = section.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list",
+    });
+    const hiddenWrap = section.createEl("div", { cls: "lifeplanner-action-plan-hidden" });
+    const hiddenHeader = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-action-plan-hidden-header",
+    });
+    const hiddenToggle = hiddenHeader.createEl("button", { text: "非表示リスト" });
+    const hiddenList = hiddenWrap.createEl("div", {
+      cls: "lifeplanner-weekly-list lifeplanner-action-plan-list is-hidden",
+    });
     this.actionPlanRows = [];
 
     const tasks = await this.tasksService.listTasks();
@@ -351,12 +451,38 @@ export class WeeklyPlanView extends ItemView {
         return levelIndex >= minLevelIndex;
       })
       .map((task) => {
-        const level = goalLevelMap.get(task.goalId);
-        const goalTitle = goalTitleMap.get(task.goalId) ?? task.goalId;
         const value = `${task.goalId} / ${task.title}`;
-        const label = level ? `【${level}】${goalTitle} / ${task.title}` : `${goalTitle} / ${task.title}`;
+        const label = task.title;
         return { value, label };
       });
+
+    let hiddenOpen = false;
+    const setHiddenOpen = (open: boolean): void => {
+      hiddenOpen = open;
+      hiddenList.classList.toggle("is-hidden", !hiddenOpen);
+    };
+
+    const updateHiddenCount = (): void => {
+      const count = hiddenList.querySelectorAll(".lifeplanner-action-plan-row").length;
+      hiddenToggle.setText(`非表示リスト (${count})`);
+      hiddenWrap.classList.toggle("is-empty", count === 0);
+      if (count === 0) {
+        setHiddenOpen(false);
+      }
+    };
+
+    const moveRow = (row: HTMLElement, done: boolean): void => {
+      const target = done ? hiddenList : list;
+      if (row.parentElement !== target) {
+        target.appendChild(row);
+      }
+      updateHiddenCount();
+    };
+
+    hiddenToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      setHiddenOpen(!hiddenOpen);
+    });
 
     const addRow = (value: string, done: boolean) => {
       const row = list.createEl("div", { cls: "lifeplanner-action-plan-row" });
@@ -365,7 +491,10 @@ export class WeeklyPlanView extends ItemView {
         cls: "lifeplanner-action-plan-checkbox",
       });
       checkbox.checked = done;
-      checkbox.addEventListener("change", () => this.scheduleSave());
+      checkbox.addEventListener("change", () => {
+        moveRow(row, checkbox.checked);
+        this.scheduleSave();
+      });
       const select = row.createEl("select", { cls: "lifeplanner-action-plan-select" });
       const placeholder = select.createEl("option", { text: "選択", value: "" });
       placeholder.disabled = true;
@@ -376,21 +505,20 @@ export class WeeklyPlanView extends ItemView {
       const optionValues = options.map((option) => option.value);
       if (value && !optionValues.includes(value)) {
         const goalId = value.split(" / ")[0];
-        const existingLevel = goalLevelMap.get(goalId);
-        const goalTitle = goalTitleMap.get(goalId) ?? goalId;
-        const label = existingLevel ? `【${existingLevel}】${goalTitle} / ${value.split(" / ")[1] ?? ""}` : value;
+        const label = value.split(" / ")[1] ?? goalTitleMap.get(goalId) ?? value;
         select.createEl("option", { text: label, value });
       }
       select.value = value;
       select.addEventListener("change", () => this.scheduleSave());
-      const remove = row.createEl("button", { text: "×", cls: "lifeplanner-action-plan-remove" });
-      remove.addEventListener("click", (event) => {
-        event.preventDefault();
+      const menuScope = this.viewEl ?? row;
+      attachDeleteMenu(row, menuScope, () => {
         row.remove();
         this.actionPlanRows = this.actionPlanRows.filter((item) => item.select !== select);
+        updateHiddenCount();
         this.scheduleSave();
       });
       this.actionPlanRows.push({ select, checkbox });
+      moveRow(row, done);
     };
 
     const actions = section.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
@@ -405,6 +533,7 @@ export class WeeklyPlanView extends ItemView {
     } else {
       plan.actionPlans.forEach((item) => addRow(item.title, item.done));
     }
+    updateHiddenCount();
   }
 
   private renderReflection(container: HTMLElement, plan: WeeklyPlan): void {
@@ -458,9 +587,8 @@ export class WeeklyPlanView extends ItemView {
     input.placeholder = placeholder;
     input.value = value;
     input.addEventListener("input", () => this.scheduleSave());
-    const remove = row.createEl("button", { text: "×" });
-    remove.addEventListener("click", (event) => {
-      event.preventDefault();
+    const menuScope = this.viewEl ?? row;
+    attachDeleteMenu(row, menuScope, () => {
       row.remove();
       const index = inputs.indexOf(input);
       if (index >= 0) {
@@ -471,63 +599,193 @@ export class WeeklyPlanView extends ItemView {
     inputs.push(input);
   }
 
-  private renderDailyMemos(container: HTMLElement, plan: WeeklyPlan): void {
+  private async renderDailyMemos(container: HTMLElement): Promise<void> {
     const section = container.createEl("div", { cls: "lifeplanner-weekly-section" });
-    section.createEl("h3", { text: "日付ごとの一言メモ欄" });
+    section.createEl("h3", { text: "日付ごとのメモ" });
     const grid = section.createEl("div", { cls: "lifeplanner-daily-memos" });
-    for (const day of this.dayOrder) {
+
+    const items = await this.inboxService.listItems();
+    const weekStart = new Date(this.weekStart);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    const itemsByDay = new Map<string, InboxItem[]>();
+    this.dayOrder.forEach((day) => itemsByDay.set(day, []));
+
+    items.forEach((item) => {
+      if (typeof item.createdAt !== "number") {
+        return;
+      }
+      const created = new Date(item.createdAt);
+      if (created < weekStart || created >= weekEnd) {
+        return;
+      }
+      const diff = Math.floor((startOfDay(created).getTime() - weekStart.getTime()) / DAY_MS);
+      const day = this.dayOrder[diff];
+      if (!day) {
+        return;
+      }
+      itemsByDay.get(day)?.push(item);
+    });
+
+    const buildMemoRow = (list: HTMLElement, item: InboxItem): HTMLElement => {
+      const row = list.createEl("div", { cls: "lifeplanner-tweet-row" });
+      row.setAttribute("data-created-at", `${item.createdAt ?? 0}`);
+      row.createEl("span", {
+        cls: "lifeplanner-tweet-time",
+        text: formatTime(item.createdAt),
+      });
+      const input = row.createEl("input", { type: "text", cls: "lifeplanner-tweet-input" });
+      input.value = item.content;
+      let lastSaved = item.content;
+      input.addEventListener("input", () => {
+        const nextValue = input.value.trim();
+        if (!nextValue || nextValue === lastSaved) {
+          return;
+        }
+        lastSaved = nextValue;
+        this.scheduleTweetSave(item.id, nextValue);
+      });
+      input.addEventListener("blur", () => {
+        if (input.value.trim().length === 0) {
+          input.value = lastSaved;
+          this.setStatus("メモを入力してください");
+        }
+      });
+      const menuScope = this.viewEl ?? row;
+      attachDeleteMenu(row, menuScope, () => {
+        void this.inboxService.deleteItem(item.id).then(() => {
+          row.remove();
+          if (list.querySelectorAll(".lifeplanner-tweet-row").length === 0) {
+            list.createEl("div", { cls: "lifeplanner-tweet-empty", text: "(未登録)" });
+          }
+          this.setStatus("削除しました");
+        });
+      });
+      return row;
+    };
+
+    const insertMemoRow = (
+      list: HTMLElement,
+      row: HTMLElement,
+      createdAt?: number
+    ): void => {
+      const value = createdAt ?? 0;
+      const rows = Array.from(list.querySelectorAll<HTMLElement>(".lifeplanner-tweet-row"));
+      const before = rows.find((existing) => {
+        const existingValue = Number(existing.getAttribute("data-created-at") ?? 0);
+        return existingValue > value;
+      });
+      if (before) {
+        list.insertBefore(row, before);
+      } else {
+        list.appendChild(row);
+      }
+    };
+
+    const clearEmptyState = (list: HTMLElement): void => {
+      list.querySelectorAll(".lifeplanner-tweet-empty").forEach((empty) => {
+        empty.remove();
+      });
+    };
+
+    const addMemo = async (
+      list: HTMLElement,
+      baseDate: Date,
+      input: HTMLInputElement
+    ): Promise<void> => {
+      const content = input.value.trim();
+      if (!content) {
+        this.setStatus("メモを入力してください");
+        input.focus();
+        return;
+      }
+      const now = new Date();
+      const created = new Date(baseDate);
+      created.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+      const item = await this.inboxService.addItem(content, created.getTime());
+      input.value = "";
+      clearEmptyState(list);
+      const row = buildMemoRow(list, item);
+      insertMemoRow(list, row, item.createdAt);
+      this.setStatus("メモを追加しました");
+    };
+
+    this.dayOrder.forEach((day, index) => {
       const card = grid.createEl("div", { cls: "lifeplanner-daily-memo-card" });
       this.dailyMemoCards.set(day, card);
       const header = card.createEl("div", { cls: "lifeplanner-daily-memo-header" });
       header.createEl("h4", { text: day });
       const dateLabel = header.createEl("span", { cls: "lifeplanner-daily-memo-date" });
       this.dayDateLabels.set(day, dateLabel);
+      const addRow = card.createEl("div", { cls: "lifeplanner-daily-memo-add" });
+      const addInput = addRow.createEl("input", {
+        type: "text",
+        cls: "lifeplanner-daily-memo-input",
+      });
+      addInput.placeholder = "メモを追加";
+      const addButton = addRow.createEl("button", { text: "追加" });
+      addButton.setAttr("type", "button");
       const list = card.createEl("div", { cls: "lifeplanner-weekly-list" });
-      const actions = card.createEl("div", { cls: "lifeplanner-weekly-list-actions" });
-      const addButton = actions.createEl("button", { text: "追加" });
-      const inputs: HTMLInputElement[] = [];
-      this.memoInputs.set(day, inputs);
-      const addMemo = (value: string) => {
-        const row = list.createEl("div", { cls: "lifeplanner-weekly-list-row" });
-        const input = row.createEl("input", { type: "text" });
-        input.placeholder = "今日の一言";
-        input.value = value;
-        input.addEventListener("input", () => this.scheduleSave());
-        const remove = row.createEl("button", { text: "×" });
-        remove.addEventListener("click", (event) => {
-          event.preventDefault();
-          row.remove();
-          const index = inputs.indexOf(input);
-          if (index >= 0) {
-            inputs.splice(index, 1);
-          }
-          this.scheduleSave();
-        });
-        inputs.push(input);
+
+      const dayItems = itemsByDay.get(day) ?? [];
+      if (dayItems.length === 0) {
+        list.createEl("div", { cls: "lifeplanner-tweet-empty", text: "(未登録)" });
+      }
+
+      const dayDate = new Date(weekStart);
+      dayDate.setDate(weekStart.getDate() + index);
+
+      const handleAdd = (): void => {
+        void addMemo(list, dayDate, addInput);
       };
+
       addButton.addEventListener("click", (event) => {
         event.preventDefault();
-        addMemo("");
-        this.scheduleSave();
+        handleAdd();
       });
-      const memos = plan.dailyMemos[day] ?? [];
-      memos.forEach((memo) => addMemo(memo));
-      addMemo("");
-    }
+      addInput.addEventListener("keydown", (event) => {
+        if (event.isComposing || event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        handleAdd();
+      });
+
+      dayItems
+        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+        .forEach((item) => {
+          const row = buildMemoRow(list, item);
+          insertMemoRow(list, row, item.createdAt);
+        });
+    });
   }
 
   private async loadPlanForWeek(weekStart: Date): Promise<WeeklyPlan> {
     const path = resolveWeeklyPlanPath(weekStart, this.plugin.settings.storageDir);
     this.currentWeekPath = path;
-    const content = await this.repository.read(path);
+    let content = await this.repository.read(path);
+    if (!content) {
+      const legacyPath = resolveWeeklyPlanPath(weekStart, this.plugin.settings.storageDir, {
+        forceMonday: false,
+      });
+      if (legacyPath !== path) {
+        const legacyContent = await this.repository.read(legacyPath);
+        if (legacyContent) {
+          await this.repository.write(path, legacyContent);
+          content = legacyContent;
+        }
+      }
+    }
     if (!content) {
       const emptyPlan = this.buildEmptyPlan();
       const shared = await this.loadShared();
       emptyPlan.weekLabel = formatWeekLabel(weekStart, this.plugin.settings.weekStart);
       emptyPlan.monthTheme = shared.monthThemes[getMonthKey(weekStart)] ?? "";
-      emptyPlan.routineActions = shared.routineActions.map((action) => ({
-        title: action.title,
-        checks: { ...action.checks },
+      emptyPlan.routineActions = shared.routineActions.map((title) => ({
+        title,
+        checks: {},
       }));
       emptyPlan.roles = shared.roles.map((role) => ({
         role,
@@ -536,10 +794,13 @@ export class WeeklyPlanView extends ItemView {
       const serialized = serializeWeeklyPlan(emptyPlan, this.plugin.settings.defaultTags);
       this.lastSavedContent = serialized;
       await this.repository.write(path, serialized);
+      this.loadedPlan = emptyPlan;
       return emptyPlan;
     }
     this.lastSavedContent = content;
-    return parseWeeklyPlan(content);
+    const plan = parseWeeklyPlan(content);
+    this.loadedPlan = plan;
+    return plan;
   }
 
   private async loadShared(): Promise<WeeklyShared> {
@@ -562,10 +823,9 @@ export class WeeklyPlanView extends ItemView {
 
   private async saveShared(plan: WeeklyPlan): Promise<void> {
     const shared = await this.loadShared();
-    shared.routineActions = plan.routineActions.map((action) => ({
-      title: action.title,
-      checks: { ...action.checks },
-    }));
+    shared.routineActions = plan.routineActions
+      .map((action) => action.title.trim())
+      .filter((title) => title.length > 0);
     shared.roles = this.roleSections
       .map((role) => role.roleInput.value.trim())
       .filter((value) => value.length > 0);
@@ -597,7 +857,10 @@ export class WeeklyPlanView extends ItemView {
   }
 
   private async savePlan(): Promise<void> {
-    const plan = this.buildEmptyPlan();
+    const plan = this.loadedPlan ? { ...this.loadedPlan } : this.buildEmptyPlan();
+    if (!plan.slots || plan.slots.length === 0) {
+      plan.slots = BASE_DAYS.map((day) => ({ day, entries: [] }));
+    }
     plan.weeklyGoals = [];
     plan.weekLabel = this.weekLabelInput ? this.weekLabelInput.value.trim() : "";
     plan.monthTheme = this.monthThemeInput ? this.monthThemeInput.value.trim() : "";
@@ -632,10 +895,6 @@ export class WeeklyPlanView extends ItemView {
       .map((input) => input.value.trim())
       .filter((value) => value.length > 0);
     for (const day of BASE_DAYS) {
-      const inputs = this.memoInputs.get(day) ?? [];
-      plan.dailyMemos[day] = inputs
-        .map((input) => input.value.trim())
-        .filter((value) => value.length > 0);
       const slot = plan.slots.find((entry) => entry.day === day);
       if (slot) {
         const dateLabel = this.dayDateLabels.get(day);
@@ -650,6 +909,7 @@ export class WeeklyPlanView extends ItemView {
     }
     await this.repository.write(this.currentWeekPath, serialized);
     this.lastSavedContent = serialized;
+    this.loadedPlan = plan;
     await this.saveShared(plan);
     this.setStatus("保存しました");
   }
@@ -664,6 +924,20 @@ export class WeeklyPlanView extends ItemView {
     }, 2000);
   }
 
+  private scheduleTweetSave(itemId: string, content: string): void {
+    const existing = this.tweetSaveTimers.get(itemId);
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+    const timer = window.setTimeout(() => {
+      void this.inboxService.updateItem(itemId, content).then(() => {
+        this.setStatus("保存しました");
+      });
+      this.tweetSaveTimers.delete(itemId);
+    }, 400);
+    this.tweetSaveTimers.set(itemId, timer);
+  }
+
   private scheduleSave(): void {
     if (this.saveTimer) {
       window.clearTimeout(this.saveTimer);
@@ -671,6 +945,13 @@ export class WeeklyPlanView extends ItemView {
     this.saveTimer = window.setTimeout(() => {
       void this.savePlan();
     }, 500);
+  }
+
+  private clearTweetSaveTimers(): void {
+    this.tweetSaveTimers.forEach((timer) => {
+      window.clearTimeout(timer);
+    });
+    this.tweetSaveTimers.clear();
   }
 
   private updateWeekMeta(): void {
@@ -696,6 +977,54 @@ export class WeeklyPlanView extends ItemView {
   private autoResize(textarea: HTMLTextAreaElement): void {
     textarea.style.height = "auto";
     textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+}
+
+export class WeeklyPlanView extends ItemView {
+  private plugin: LifePlannerPlugin;
+  private renderer: WeeklyPlanRenderer;
+
+  constructor(leaf: WorkspaceLeaf, plugin: LifePlannerPlugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.renderer = new WeeklyPlanRenderer(plugin);
+  }
+
+  getViewType(): string {
+    return WEEKLY_PLAN_VIEW_TYPE;
+  }
+
+  getDisplayText(): string {
+    return "週間計画";
+  }
+
+  async onOpen(): Promise<void> {
+    await this.renderer.render(this.contentEl, {
+      showNavigation: true,
+      showHeader: true,
+      attachMenuClose: true,
+      onNavigate: (viewType) => {
+        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      },
+      hiddenViewTypes: this.plugin.settings.hiddenTabs,
+    });
+  }
+
+  async renderEmbedded(
+    container: HTMLElement,
+    options: WeeklyPlanRenderOptions = {}
+  ): Promise<void> {
+    await this.renderer.render(container, {
+      showNavigation: options.showNavigation ?? false,
+      showHeader: options.showHeader ?? true,
+      attachMenuClose: options.attachMenuClose ?? false,
+      onNavigate: options.onNavigate,
+      hiddenViewTypes: options.hiddenViewTypes,
+    });
+  }
+
+  async onClose(): Promise<void> {
+    await this.renderer.onClose();
   }
 }
 
@@ -741,6 +1070,22 @@ function formatFullDate(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}/${month}/${day}`;
+}
+
+function formatTime(timestamp?: number): string {
+  if (!timestamp) {
+    return "--:--";
+  }
+  const date = new Date(timestamp);
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function startOfDay(date: Date): Date {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
 }
 
 function isSameDay(a: Date, b: Date): boolean {

@@ -1,4 +1,5 @@
 import {
+  DASHBOARD_VIEW_TYPE,
   EXERCISES_VIEW_TYPE,
   GOAL_TASK_VIEW_TYPE,
   GOALS_VIEW_TYPE,
@@ -12,24 +13,25 @@ import {
   WEEKLY_PLAN_VIEW_TYPE,
 } from "./view_types";
 
-type NavGroupId = "operations" | "foundation";
+export type NavGroupId = "operations" | "foundation";
 
-type NavItem = {
+export type NavItem = {
   label: string;
   viewType: LifePlannerViewType;
 };
 
-type NavGroup = {
+export type NavGroup = {
   id: NavGroupId;
   label: string;
   items: NavItem[];
 };
 
-const NAV_GROUPS: NavGroup[] = [
+export const NAV_GROUPS: NavGroup[] = [
   {
     id: "operations",
     label: "日常",
     items: [
+      { label: "ダッシュボード", viewType: DASHBOARD_VIEW_TYPE },
       { label: "週間計画", viewType: WEEKLY_PLAN_VIEW_TYPE },
       { label: "Inbox", viewType: INBOX_VIEW_TYPE },
       { label: "アクションプラン", viewType: GOAL_TASK_VIEW_TYPE },
@@ -67,31 +69,45 @@ function resolveGroup(viewType: LifePlannerViewType): NavGroup {
 export function renderNavigation(
   container: HTMLElement,
   activeViewType: LifePlannerViewType,
-  onNavigate: (viewType: LifePlannerViewType) => void
+  onNavigate: (viewType: LifePlannerViewType) => void,
+  hiddenViewTypes: LifePlannerViewType[] = []
 ): void {
+  const hiddenSet = new Set(hiddenViewTypes);
   const nav = container.createEl("div", { cls: "lifeplanner-nav" });
-  const activeGroup = resolveGroup(activeViewType);
-  lastVisitedByGroup[activeGroup.id] = activeViewType;
+  const rawActiveGroup = resolveGroup(activeViewType);
+  lastVisitedByGroup[rawActiveGroup.id] = activeViewType;
+
+  const visibleGroups = NAV_GROUPS.map((group) => {
+    const visibleItems = group.items.filter(
+      (item) => !hiddenSet.has(item.viewType) || item.viewType === activeViewType
+    );
+    return { ...group, items: visibleItems };
+  }).filter((group) => group.items.length > 0);
+
+  const activeGroup =
+    visibleGroups.find((group) => group.id === rawActiveGroup.id) ?? visibleGroups[0];
 
   const groupRow = nav.createEl("div", { cls: "lifeplanner-nav-groups" });
-  NAV_GROUPS.forEach((group) => {
+  visibleGroups.forEach((group) => {
     const button = groupRow.createEl("button", {
       text: group.label,
       cls: "lifeplanner-nav-group",
     });
     button.setAttr("type", "button");
-    if (group.id === activeGroup.id) {
+    if (activeGroup && group.id === activeGroup.id) {
       button.classList.add("is-active");
       button.setAttr("aria-current", "page");
     }
     button.addEventListener("click", () => {
-      const target = lastVisitedByGroup[group.id] ?? group.items[0]?.viewType ?? activeViewType;
+      const last = lastVisitedByGroup[group.id];
+      const hasLast = Boolean(last && group.items.some((item) => item.viewType === last));
+      const target = (hasLast ? last : group.items[0]?.viewType) ?? activeViewType;
       onNavigate(target);
     });
   });
 
   const tabRow = nav.createEl("div", { cls: "lifeplanner-nav-tabs" });
-  activeGroup.items.forEach((item) => {
+  (activeGroup?.items ?? []).forEach((item) => {
     const button = tabRow.createEl("button", {
       text: item.label,
       cls: "lifeplanner-nav-tab",

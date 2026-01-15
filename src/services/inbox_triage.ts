@@ -1,6 +1,8 @@
 import { InboxItem } from "../models/inbox_item";
+import { GoalLevel } from "../models/goal";
 import { WeeklyPlan } from "../models/weekly_plan";
 import { GoalsService } from "./goals_service";
+import { IssuesService } from "./issues_service";
 import { MarkdownRepository } from "./markdown_repository";
 import { TasksService } from "./tasks_service";
 import { parseWeeklyPlan, serializeWeeklyPlan } from "./weekly_plan_io";
@@ -9,6 +11,7 @@ import { resolveWeeklyPlanPath } from "../storage/path_resolver";
 export class InboxTriage {
   private goalsService: GoalsService;
   private tasksService: TasksService;
+  private issuesService: IssuesService;
   private repository: MarkdownRepository;
   private baseDir: string;
   private weekStart: "monday" | "sunday";
@@ -26,14 +29,15 @@ export class InboxTriage {
     this.defaultTags = defaultTags;
     this.goalsService = new GoalsService(repository, baseDir, defaultTags);
     this.tasksService = new TasksService(repository, baseDir, defaultTags);
+    this.issuesService = new IssuesService(repository, baseDir, defaultTags);
   }
 
-  async toGoal(item: InboxItem): Promise<void> {
-    await this.goalsService.addGoal("週間", item.content);
+  async toGoal(item: InboxItem, level: GoalLevel): Promise<void> {
+    await this.goalsService.addGoal(level, item.content);
   }
 
-  async toTask(item: InboxItem): Promise<void> {
-    await this.tasksService.addTask("週間", item.content);
+  async toTask(item: InboxItem, goalTitle: string): Promise<void> {
+    await this.tasksService.addTask(goalTitle, item.content);
   }
 
   async toWeekly(item: InboxItem): Promise<void> {
@@ -43,6 +47,17 @@ export class InboxTriage {
     const plan = content ? parseWeeklyPlan(content) : emptyPlan();
     plan.actionPlans.push({ title: item.content, done: false });
     await this.repository.write(path, serializeWeeklyPlan(plan, this.defaultTags));
+  }
+
+  async toIssue(item: InboxItem): Promise<void> {
+    const issues = await this.issuesService.listIssues();
+    issues.push({
+      id: `issue-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      title: item.content,
+      status: "Backlog",
+      body: "",
+    });
+    await this.issuesService.saveIssues(issues);
   }
 }
 

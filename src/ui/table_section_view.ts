@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 import type LifePlannerPlugin from "../main";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { TableColumn, TableSectionService } from "../services/table_section_service";
+import { attachDeleteMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { LifePlannerViewType } from "./view_types";
 
@@ -14,6 +15,10 @@ export class TableSectionView extends ItemView {
   private statusEl: HTMLElement | null = null;
   private rows: string[][] = [];
   private tableEl: HTMLElement | null = null;
+  private sectionType: string;
+  private enableRowActions = true;
+  private viewEl: HTMLElement | null = null;
+  private disposeMenuClose: (() => void) | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -28,6 +33,7 @@ export class TableSectionView extends ItemView {
     this.viewType = viewType;
     this.titleText = titleText;
     this.columns = columns;
+    this.sectionType = type;
     this.service = new TableSectionService(
       new MarkdownRepository(this.plugin.app),
       type as never,
@@ -50,14 +56,18 @@ export class TableSectionView extends ItemView {
     const container = this.contentEl;
     container.empty();
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    this.viewEl = view;
+    enableTapToBlur(view);
+    this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: this.titleText });
     renderNavigation(view, this.viewType, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
     this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
     const header = view.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = header.createEl("button", { text: "追加" });
     this.tableEl = view.createEl("div", { cls: "lifeplanner-table-grid" });
+    this.tableEl.dataset.sectionType = this.sectionType;
     await this.renderTable();
     addButton.addEventListener("click", () => {
       this.rows.push([]);
@@ -70,6 +80,9 @@ export class TableSectionView extends ItemView {
     this.statusEl = null;
     this.tableEl = null;
     this.rows = [];
+    this.viewEl = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
   }
 
   private async renderTable(): Promise<void> {
@@ -77,7 +90,7 @@ export class TableSectionView extends ItemView {
       return;
     }
     this.tableEl.empty();
-    this.tableEl.style.gridTemplateColumns = this.columns
+    const columnTemplate = this.columns
       .map((column) => {
         if (column.width) {
           return column.width;
@@ -91,6 +104,8 @@ export class TableSectionView extends ItemView {
         return "minmax(160px, 1fr)";
       })
       .join(" ");
+    const actionColumn = this.enableRowActions ? "36px" : "";
+    this.tableEl.style.gridTemplateColumns = [columnTemplate, actionColumn].filter(Boolean).join(" ");
     this.rows = await this.service.loadRows();
     if (this.rows.length === 0) {
       this.rows.push([]);
@@ -102,6 +117,12 @@ export class TableSectionView extends ItemView {
         text: column.label,
       });
     });
+    if (this.enableRowActions) {
+      this.tableEl?.createEl("div", {
+        cls: "lifeplanner-table-cell lifeplanner-table-header",
+        text: "",
+      });
+    }
 
     this.rows.forEach((row, rowIndex) => {
       this.columns.forEach((column, colIndex) => {
@@ -130,13 +151,33 @@ export class TableSectionView extends ItemView {
             this.setCell(rowIndex, colIndex, checkbox.checked ? "x" : "");
           });
         } else {
-          const input = cell.createEl("input", { type: "text" });
-          input.value = value;
-          input.addEventListener("input", () => {
-            this.setCell(rowIndex, colIndex, input.value);
-          });
+          if (column.multiline) {
+            const input = cell.createEl("textarea");
+            input.rows = 1;
+            input.value = value;
+            this.autoResizeTextarea(input);
+            input.addEventListener("input", () => {
+              this.setCell(rowIndex, colIndex, input.value);
+              this.autoResizeTextarea(input);
+            });
+          } else {
+            const input = cell.createEl("input", { type: "text" });
+            input.value = value;
+            input.addEventListener("input", () => {
+              this.setCell(rowIndex, colIndex, input.value);
+            });
+          }
         }
       });
+      if (this.enableRowActions) {
+        const cell = this.tableEl?.createEl("div", { cls: "lifeplanner-table-cell" });
+        const menuScope = this.viewEl ?? this.tableEl ?? cell;
+        if (cell && menuScope) {
+          attachDeleteMenu(cell, menuScope, () => {
+            this.removeRow(rowIndex);
+          });
+        }
+      }
     });
   }
 
@@ -150,6 +191,19 @@ export class TableSectionView extends ItemView {
   private async save(): Promise<void> {
     await this.service.saveRows(this.rows);
     this.setStatus("保存しました");
+  }
+
+  private removeRow(rowIndex: number): void {
+    this.rows.splice(rowIndex, 1);
+    if (this.rows.length === 0) {
+      this.rows.push([]);
+    }
+    void this.save().then(() => this.renderTable());
+  }
+
+  private autoResizeTextarea(textarea: HTMLTextAreaElement): void {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
   }
 
   private setStatus(message: string): void {

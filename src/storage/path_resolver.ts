@@ -20,9 +20,19 @@ export function resolveLifePlannerPath(type: LifePlannerType, baseDir = "LifePla
   return dir ? `${dir}/${filename}` : filename;
 }
 
-export function resolveWeeklyPlanPath(weekStart: Date, baseDir = "LifePlanner"): string {
+type WeeklyPlanPathOptions = {
+  forceMonday?: boolean;
+};
+
+export function resolveWeeklyPlanPath(
+  weekStart: Date,
+  baseDir = "LifePlanner",
+  options: WeeklyPlanPathOptions = {}
+): string {
   const dir = normalizeBaseDir(baseDir);
-  const formatted = formatDate(weekStart);
+  const forceMonday = options.forceMonday !== false;
+  const normalized = forceMonday ? normalizeWeeklyPlanDate(weekStart) : new Date(weekStart);
+  const formatted = formatDate(normalized);
   const filename = `${TEMPLATE_PREFIX} - Weekly - ${formatted}.md`;
   return dir ? `${dir}/${filename}` : filename;
 }
@@ -32,6 +42,17 @@ function formatDate(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function normalizeWeeklyPlanDate(date: Date): Date {
+  const normalized = new Date(date);
+  const day = normalized.getDay();
+  if (day === 0) {
+    normalized.setDate(normalized.getDate() + 1);
+  } else if (day !== 1) {
+    normalized.setDate(normalized.getDate() - (day - 1));
+  }
+  return normalized;
 }
 
 function normalizeBaseDir(value: string): string {

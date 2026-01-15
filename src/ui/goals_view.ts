@@ -3,6 +3,7 @@ import { Goal, GoalLevel } from "../models/goal";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { GoalsService } from "../services/goals_service";
 import type LifePlannerPlugin from "../main";
+import { enableTapToBlur } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { GOALS_VIEW_TYPE } from "./view_types";
 export { GOALS_VIEW_TYPE };
@@ -53,10 +54,11 @@ export class GoalsView extends ItemView {
     container.empty();
 
     const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
     view.createEl("h2", { text: "目標" });
     renderNavigation(view, GOALS_VIEW_TYPE, (viewType) => {
       void this.plugin.openViewInLeaf(viewType, this.leaf);
-    });
+    }, this.plugin.settings.hiddenTabs);
 
     const formWrap = view.createEl("div", { cls: "lifeplanner-goals-form-wrap" });
     this.formWrapEl = formWrap;

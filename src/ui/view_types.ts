@@ -1,3 +1,4 @@
+export const DASHBOARD_VIEW_TYPE = "lifeplanner-dashboard";
 export const WEEKLY_PLAN_VIEW_TYPE = "lifeplanner-weekly-plan";
 export const INBOX_VIEW_TYPE = "lifeplanner-inbox";
 export const GOALS_VIEW_TYPE = "lifeplanner-goals";
@@ -10,6 +11,7 @@ export const PROMISE_VIEW_TYPE = "lifeplanner-promise";
 export const VALUES_VIEW_TYPE = "lifeplanner-values";
 
 export type LifePlannerViewType =
+  | typeof DASHBOARD_VIEW_TYPE
   | typeof WEEKLY_PLAN_VIEW_TYPE
   | typeof INBOX_VIEW_TYPE
   | typeof GOALS_VIEW_TYPE
