@@ -1,0 +1,13 @@
+{
+  "name": "lifeplanner",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "deploy": "bash ./scripts/build-deploy.sh"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.3"
+  }
+}
