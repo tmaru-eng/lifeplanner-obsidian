@@ -1289,7 +1289,7 @@ function parseWeeklyShared(content) {
 
 // src/ui/weekly_plan_view.ts
 var BASE_DAYS = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F", "\u65E5"];
-var ROUTINE_DAYS3 = ["\u6708", "\u706B", "\u6C34", "\u6728", "\u91D1", "\u571F"];
+var ROUTINE_DAYS3 = BASE_DAYS;
 var LEVELS = ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"];
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var WeeklyPlanRenderer = class {
@@ -3725,6 +3725,17 @@ var GoalsView = class extends import_obsidian6.ItemView {
     const addButton = actionField.createEl("button", { text: "\u8FFD\u52A0" });
     this.statusEl = view.createEl("div", { cls: "lifeplanner-goals-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-goals-list" });
+    let lastAutoDue = resolveDefaultDueDate(levelSelect.value);
+    if (!dueInput.value) {
+      dueInput.value = lastAutoDue;
+    }
+    levelSelect.addEventListener("change", () => {
+      const nextAuto = resolveDefaultDueDate(levelSelect.value);
+      if (!dueInput.value || dueInput.value === lastAutoDue) {
+        dueInput.value = nextAuto;
+      }
+      lastAutoDue = nextAuto;
+    });
     addButton.addEventListener("click", () => {
       const parentValue = parentSelect.value ? parentSelect.value : void 0;
       void this.handleAddGoal(
@@ -3736,7 +3747,8 @@ var GoalsView = class extends import_obsidian6.ItemView {
       );
       titleInput.value = "";
       descriptionInput.value = "";
-      dueInput.value = "";
+      lastAutoDue = resolveDefaultDueDate(levelSelect.value);
+      dueInput.value = lastAutoDue;
     });
     formToggle.addEventListener("click", (event) => {
       event.preventDefault();
@@ -3913,7 +3925,7 @@ var GoalsView = class extends import_obsidian6.ItemView {
     const modal = new GoalEditModal(this.app, {
       title: "",
       description: "",
-      dueDate: "",
+      dueDate: resolveDefaultDueDate(childLevel),
       parentGoalId: node.title,
       level: childLevel,
       lockLevel: false,
@@ -4139,9 +4151,7 @@ function renderGoalTree(container, nodes, depth, onEdit, onDelete, onAddChild, o
   for (const node of nodes) {
     const card = container.createEl("details", { cls: "lifeplanner-goal-card" });
     card.open = Boolean(node.expanded);
-    if (depth > 0) {
-      card.style.marginLeft = `${depth * 16}px`;
-    }
+    card.style.setProperty("--goal-indent", `${depth * 8}px`);
     const summary = card.createEl("summary", { cls: "lifeplanner-goal-summary" });
     summary.setAttr("aria-label", node.title);
     const dragHandle = summary.createEl("span", {
@@ -4262,6 +4272,59 @@ function levelsBelow(current) {
   }
   return LEVELS2.slice(index + 1);
 }
+function resolveDefaultDueDate(level, baseDate = /* @__PURE__ */ new Date()) {
+  const base = new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate()
+  );
+  let target = base;
+  switch (level) {
+    case "\u4EBA\u751F": {
+      return "";
+    }
+    case "\u9031\u9593": {
+      const day2 = base.getDay();
+      const offset = (7 - day2) % 7;
+      target = new Date(base);
+      target.setDate(base.getDate() + offset);
+      break;
+    }
+    case "\u6708\u9593": {
+      target = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+      break;
+    }
+    case "\u56DB\u534A\u671F": {
+      const quarter = Math.floor(base.getMonth() / 3);
+      let endMonth = quarter * 3 + 2;
+      target = new Date(base.getFullYear(), endMonth + 1, 0);
+      if (target < base) {
+        endMonth += 3;
+        target = new Date(base.getFullYear(), endMonth + 1, 0);
+      }
+      break;
+    }
+    case "\u5E74\u9593": {
+      target = new Date(base.getFullYear(), 11, 31);
+      break;
+    }
+    case "\u4E2D\u671F": {
+      target = new Date(base.getFullYear() + 3, 11, 31);
+      break;
+    }
+    case "\u9577\u671F": {
+      target = new Date(base.getFullYear() + 5, 11, 31);
+      break;
+    }
+    default: {
+      return "";
+    }
+  }
+  const year = target.getFullYear();
+  const month = `${target.getMonth() + 1}`.padStart(2, "0");
+  const day = `${target.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 var GoalEditModal = class extends import_obsidian6.Modal {
   constructor(app, options) {
     super(app);
@@ -4298,6 +4361,17 @@ var GoalEditModal = class extends import_obsidian6.Modal {
     dueField.createEl("label", { text: "\u671F\u9650" });
     const dueInput = dueField.createEl("input", { type: "date" });
     dueInput.value = this.options.dueDate;
+    let lastAutoDue = resolveDefaultDueDate(levelSelect.value);
+    if (!dueInput.value) {
+      dueInput.value = lastAutoDue;
+    }
+    levelSelect.addEventListener("change", () => {
+      const nextAuto = resolveDefaultDueDate(levelSelect.value);
+      if (!dueInput.value || dueInput.value === lastAutoDue) {
+        dueInput.value = nextAuto;
+      }
+      lastAutoDue = nextAuto;
+    });
     const actions = contentEl.createEl("div", { cls: "lifeplanner-goal-actions" });
     const saveButton = actions.createEl("button", { text: "\u4FDD\u5B58" });
     const cancelButton = actions.createEl("button", { text: "\u30AD\u30E3\u30F3\u30BB\u30EB" });

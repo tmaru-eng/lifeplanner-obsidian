@@ -17,7 +17,7 @@ import { LifePlannerViewType, WEEKLY_PLAN_VIEW_TYPE } from "./view_types";
 export { WEEKLY_PLAN_VIEW_TYPE };
 
 const BASE_DAYS = ["月", "火", "水", "木", "金", "土", "日"];
-const ROUTINE_DAYS = ["月", "火", "水", "木", "金", "土"];
+const ROUTINE_DAYS = BASE_DAYS;
 const LEVELS: GoalLevel[] = ["人生", "長期", "中期", "年間", "四半期", "月間", "週間"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 

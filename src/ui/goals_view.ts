@@ -115,6 +115,18 @@ export class GoalsView extends ItemView {
     this.statusEl = view.createEl("div", { cls: "lifeplanner-goals-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-goals-list" });
 
+    let lastAutoDue = resolveDefaultDueDate(levelSelect.value as GoalLevel);
+    if (!dueInput.value) {
+      dueInput.value = lastAutoDue;
+    }
+    levelSelect.addEventListener("change", () => {
+      const nextAuto = resolveDefaultDueDate(levelSelect.value as GoalLevel);
+      if (!dueInput.value || dueInput.value === lastAutoDue) {
+        dueInput.value = nextAuto;
+      }
+      lastAutoDue = nextAuto;
+    });
+
     addButton.addEventListener("click", () => {
       const parentValue = parentSelect.value ? parentSelect.value : undefined;
       void this.handleAddGoal(
@@ -126,7 +138,8 @@ export class GoalsView extends ItemView {
       );
       titleInput.value = "";
       descriptionInput.value = "";
-      dueInput.value = "";
+      lastAutoDue = resolveDefaultDueDate(levelSelect.value as GoalLevel);
+      dueInput.value = lastAutoDue;
     });
     formToggle.addEventListener("click", (event) => {
       event.preventDefault();
@@ -323,7 +336,7 @@ export class GoalsView extends ItemView {
     const modal = new GoalEditModal(this.app, {
       title: "",
       description: "",
-      dueDate: "",
+      dueDate: resolveDefaultDueDate(childLevel),
       parentGoalId: node.title,
       level: childLevel,
       lockLevel: false,
@@ -611,9 +624,7 @@ function renderGoalTree(
   for (const node of nodes) {
     const card = container.createEl("details", { cls: "lifeplanner-goal-card" });
     card.open = Boolean(node.expanded);
-    if (depth > 0) {
-      card.style.marginLeft = `${depth * 16}px`;
-    }
+    card.style.setProperty("--goal-indent", `${depth * 8}px`);
     const summary = card.createEl("summary", { cls: "lifeplanner-goal-summary" });
     summary.setAttr("aria-label", node.title);
     const dragHandle = summary.createEl("span", {
@@ -748,6 +759,60 @@ function levelsBelow(current: GoalLevel): GoalLevel[] {
   return LEVELS.slice(index + 1);
 }
 
+function resolveDefaultDueDate(level: GoalLevel, baseDate = new Date()): string {
+  const base = new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate()
+  );
+  let target = base;
+  switch (level) {
+    case "人生": {
+      return "";
+    }
+    case "週間": {
+      const day = base.getDay();
+      const offset = (7 - day) % 7;
+      target = new Date(base);
+      target.setDate(base.getDate() + offset);
+      break;
+    }
+    case "月間": {
+      target = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+      break;
+    }
+    case "四半期": {
+      const quarter = Math.floor(base.getMonth() / 3);
+      let endMonth = quarter * 3 + 2;
+      target = new Date(base.getFullYear(), endMonth + 1, 0);
+      if (target < base) {
+        endMonth += 3;
+        target = new Date(base.getFullYear(), endMonth + 1, 0);
+      }
+      break;
+    }
+    case "年間": {
+      target = new Date(base.getFullYear(), 11, 31);
+      break;
+    }
+    case "中期": {
+      target = new Date(base.getFullYear() + 3, 11, 31);
+      break;
+    }
+    case "長期": {
+      target = new Date(base.getFullYear() + 5, 11, 31);
+      break;
+    }
+    default: {
+      return "";
+    }
+  }
+  const year = target.getFullYear();
+  const month = `${target.getMonth() + 1}`.padStart(2, "0");
+  const day = `${target.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 type GoalEditValues = {
   title: string;
   description: string;
@@ -808,6 +873,17 @@ class GoalEditModal extends Modal {
     dueField.createEl("label", { text: "期限" });
     const dueInput = dueField.createEl("input", { type: "date" });
     dueInput.value = this.options.dueDate;
+    let lastAutoDue = resolveDefaultDueDate(levelSelect.value as GoalLevel);
+    if (!dueInput.value) {
+      dueInput.value = lastAutoDue;
+    }
+    levelSelect.addEventListener("change", () => {
+      const nextAuto = resolveDefaultDueDate(levelSelect.value as GoalLevel);
+      if (!dueInput.value || dueInput.value === lastAutoDue) {
+        dueInput.value = nextAuto;
+      }
+      lastAutoDue = nextAuto;
+    });
 
     const actions = contentEl.createEl("div", { cls: "lifeplanner-goal-actions" });
     const saveButton = actions.createEl("button", { text: "保存" });
