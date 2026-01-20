@@ -20,6 +20,16 @@ export function resolveLifePlannerPath(type: LifePlannerType, baseDir = "LifePla
   return dir ? `${dir}/${filename}` : filename;
 }
 
+export function resolveTemplateSectionPath(
+  templateId: string,
+  baseDir = "LifePlanner"
+): string {
+  const dir = normalizeBaseDir(baseDir);
+  const safeId = sanitizeSegment(templateId);
+  const folder = dir ? `${dir}/Templates` : "Templates";
+  return `${folder}/${safeId}.md`;
+}
+
 type WeeklyPlanPathOptions = {
   forceMonday?: boolean;
 };
@@ -58,4 +68,9 @@ function normalizeWeeklyPlanDate(date: Date): Date {
 function normalizeBaseDir(value: string): string {
   const trimmed = value.trim().replace(/^\/+|\/+$/g, "");
   return trimmed;
+}
+
+function sanitizeSegment(value: string): string {
+  const cleaned = value.replace(/[\\/:*?"<>|]/g, "-").trim();
+  return cleaned.length > 0 ? cleaned : "template";
 }

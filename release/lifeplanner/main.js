@@ -23,7 +23,7 @@ __export(main_exports, {
   default: () => LifePlannerPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/ui/dashboard_view.ts
 var import_obsidian3 = require("obsidian");
@@ -73,6 +73,12 @@ function resolveLifePlannerPath(type, baseDir = "LifePlanner") {
   const filename = `${TEMPLATE_PREFIX} - ${type}.md`;
   return dir ? `${dir}/${filename}` : filename;
 }
+function resolveTemplateSectionPath(templateId, baseDir = "LifePlanner") {
+  const dir = normalizeBaseDir(baseDir);
+  const safeId = sanitizeSegment(templateId);
+  const folder = dir ? `${dir}/Templates` : "Templates";
+  return `${folder}/${safeId}.md`;
+}
 function resolveWeeklyPlanPath(weekStart, baseDir = "LifePlanner", options = {}) {
   const dir = normalizeBaseDir(baseDir);
   const forceMonday = options.forceMonday !== false;
@@ -100,6 +106,10 @@ function normalizeWeeklyPlanDate(date) {
 function normalizeBaseDir(value) {
   const trimmed = value.trim().replace(/^\/+|\/+$/g, "");
   return trimmed;
+}
+function sanitizeSegment(value) {
+  const cleaned = value.replace(/[\\/:*?"<>|]/g, "-").trim();
+  return cleaned.length > 0 ? cleaned : "template";
 }
 
 // src/services/goals_service.ts
@@ -1113,6 +1123,61 @@ var MISSION_VIEW_TYPE = "lifeplanner-mission";
 var HAVE_DO_BE_VIEW_TYPE = "lifeplanner-have-do-be";
 var PROMISE_VIEW_TYPE = "lifeplanner-promise";
 var VALUES_VIEW_TYPE = "lifeplanner-values";
+var TEMPLATE_SECTION_VIEW_TYPE = "lifeplanner-template";
+
+// src/services/section_templates.ts
+var BUILTIN_TEMPLATES = [
+  {
+    id: "promise",
+    label: "\u7D04\u675F",
+    viewType: PROMISE_VIEW_TYPE,
+    formatLabel: "\u8868(\u30C1\u30A7\u30C3\u30AF)"
+  },
+  {
+    id: "mission",
+    label: "\u30DF\u30C3\u30B7\u30E7\u30F3",
+    viewType: MISSION_VIEW_TYPE,
+    formatLabel: "\u30D5\u30EA\u30FC\u8A18\u5165"
+  },
+  {
+    id: "values",
+    label: "\u4FA1\u5024\u89B3",
+    viewType: VALUES_VIEW_TYPE,
+    formatLabel: "\u9805\u76EE/\u5185\u5BB9"
+  },
+  {
+    id: "have-do-be",
+    label: "Have/Do/Be",
+    viewType: HAVE_DO_BE_VIEW_TYPE,
+    formatLabel: "\u9078\u629E/\u5185\u5BB9"
+  },
+  {
+    id: "exercises",
+    label: "\u6F14\u7FD2",
+    viewType: EXERCISES_VIEW_TYPE,
+    formatLabel: "\u6F14\u7FD2\u96C6"
+  }
+];
+var DEFAULT_TEMPLATE_IDS = BUILTIN_TEMPLATES.map((template) => template.id);
+var BUILTIN_TEMPLATE_BY_ID = new Map(
+  BUILTIN_TEMPLATES.map((template) => [template.id, template])
+);
+var BUILTIN_TEMPLATE_BY_VIEW = new Map(
+  BUILTIN_TEMPLATES.map((template) => [template.viewType, template.id])
+);
+var TEMPLATE_FORMAT_LABELS = {
+  free: "\u30D5\u30EA\u30FC\u8A18\u5165",
+  pairs: "\u9805\u76EE/\u5185\u5BB9",
+  select: "\u9078\u629E/\u5185\u5BB9",
+  list: "\u30EA\u30B9\u30C8",
+  qa: "\u8CEA\u554F/\u89E3\u7B54"
+};
+function getAllTemplates(customTemplates = []) {
+  return [...BUILTIN_TEMPLATES, ...customTemplates];
+}
+function isBuiltinTemplateId(id) {
+  return BUILTIN_TEMPLATE_BY_ID.has(id);
+}
 
 // src/ui/navigation.ts
 var NAV_GROUPS = [
@@ -1140,29 +1205,262 @@ var NAV_GROUPS = [
     ]
   }
 ];
-var VIEW_GROUP_MAP = /* @__PURE__ */ new Map();
-NAV_GROUPS.forEach((group) => {
-  group.items.forEach((item) => {
-    VIEW_GROUP_MAP.set(item.viewType, group.id);
-  });
-});
-var lastVisitedByGroup = {};
-function resolveGroup(viewType) {
-  const groupId = VIEW_GROUP_MAP.get(viewType);
-  return NAV_GROUPS.find((group) => group.id === groupId) ?? NAV_GROUPS[0];
+var NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
+var NAV_ITEM_LABELS = new Map(
+  NAV_ITEMS.map((item) => [item.viewType, item.label])
+);
+function getNavItemLabel(viewType) {
+  return NAV_ITEM_LABELS.get(viewType) ?? viewType;
 }
-function renderNavigation(container, activeViewType, onNavigate, hiddenViewTypes = []) {
+var LEGACY_DEFAULT_CHILD_LABEL = "\u30E1\u30A4\u30F3";
+var getTemplateIdForView = (viewType) => BUILTIN_TEMPLATE_BY_VIEW.get(viewType) ?? null;
+var getTemplateDefaultLabel = (templateId) => BUILTIN_TEMPLATE_BY_ID.get(templateId)?.label ?? templateId;
+function navTargetKey(target) {
+  switch (target.type) {
+    case "view":
+      return `view::${target.viewType}`;
+    case "template":
+      return `template::${target.templateId}`;
+    case "exercise":
+      return `exercise::${target.section}`;
+    default:
+      return "view::unknown";
+  }
+}
+function navTargetFromKey(key) {
+  const separatorIndex = key.indexOf("::");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+  const type = key.slice(0, separatorIndex);
+  const value = key.slice(separatorIndex + 2);
+  if (!value) {
+    return null;
+  }
+  if (type === "view") {
+    return { type: "view", viewType: value };
+  }
+  if (type === "template") {
+    return { type: "template", templateId: value };
+  }
+  if (type === "exercise") {
+    return { type: "exercise", section: value };
+  }
+  return null;
+}
+function navChildHasItems(child) {
+  return Array.isArray(child.items);
+}
+function getNavTargetViewType(target) {
+  if (target.type === "view") {
+    return target.viewType;
+  }
+  if (target.type === "exercise") {
+    return EXERCISES_VIEW_TYPE;
+  }
+  if (target.type === "template") {
+    return BUILTIN_TEMPLATE_BY_ID.get(target.templateId)?.viewType ?? null;
+  }
+  return null;
+}
+function getNavTargetLabel(target, templateLabels) {
+  switch (target.type) {
+    case "view":
+      return getNavItemLabel(target.viewType);
+    case "template":
+      return templateLabels?.get(target.templateId) ?? target.templateId;
+    case "exercise":
+      return target.section;
+    default:
+      return "";
+  }
+}
+function buildDefaultNavLayout() {
+  return NAV_GROUPS.map((group) => ({
+    label: group.label,
+    children: group.items.map((item) => ({
+      label: item.label,
+      target: (() => {
+        const templateId = getTemplateIdForView(item.viewType);
+        return templateId ? { type: "template", templateId } : { type: "view", viewType: item.viewType };
+      })()
+    }))
+  }));
+}
+function normalizeNavLayout(layout, options = {}) {
+  const allowedViews = new Set(NAV_ITEMS.map((item) => item.viewType));
+  const defaultLayout = buildDefaultNavLayout();
+  if (!Array.isArray(layout) || layout.length === 0) {
+    return defaultLayout;
+  }
+  const seenTargets = /* @__PURE__ */ new Set();
+  const normalized = [];
+  const normalizeTarget = (value) => {
+    if (typeof value === "string") {
+      if (allowedViews.has(value)) {
+        const viewType = value;
+        const templateId = getTemplateIdForView(viewType);
+        return templateId ? { type: "template", templateId } : { type: "view", viewType };
+      }
+      return null;
+    }
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+    const candidate = value;
+    if (candidate.type === "view" || typeof candidate.viewType === "string") {
+      const viewType = (candidate.viewType ?? "").trim();
+      if (allowedViews.has(viewType)) {
+        const templateId = getTemplateIdForView(viewType);
+        return templateId ? { type: "template", templateId } : { type: "view", viewType };
+      }
+      return null;
+    }
+    if (candidate.type === "template" || typeof candidate.templateId === "string") {
+      const templateId = (candidate.templateId ?? "").trim();
+      if (templateId) {
+        return { type: "template", templateId };
+      }
+      return null;
+    }
+    if (candidate.type === "exercise" || typeof candidate.section === "string") {
+      const section = (candidate.section ?? "").trim();
+      if (section) {
+        return { type: "exercise", section };
+      }
+      return null;
+    }
+    return null;
+  };
+  const registerTarget = (target) => {
+    const key = navTargetKey(target);
+    if (seenTargets.has(key)) {
+      return false;
+    }
+    seenTargets.add(key);
+    return true;
+  };
+  layout.forEach((group) => {
+    const label = (group?.label ?? "").trim();
+    if (!label) {
+      return;
+    }
+    const children = Array.isArray(group.children) ? group.children : [];
+    const normalizedChildren = [];
+    children.forEach((child) => {
+      if (!child) {
+        return;
+      }
+      const childLabel = String(child.label ?? "").trim();
+      const rawItems = child.items;
+      if (Array.isArray(rawItems)) {
+        const itemTargets = [];
+        rawItems.forEach((item) => {
+          const target2 = normalizeTarget(item);
+          if (!target2) {
+            return;
+          }
+          if (registerTarget(target2)) {
+            itemTargets.push(target2);
+          }
+        });
+        const isLegacyMain = !childLabel || childLabel === LEGACY_DEFAULT_CHILD_LABEL;
+        if (isLegacyMain) {
+          itemTargets.forEach((target2) => {
+            normalizedChildren.push({
+              label: target2.type === "template" ? getTemplateDefaultLabel(target2.templateId) : getNavTargetLabel(target2),
+              target: target2
+            });
+          });
+          return;
+        }
+        const labelValue = childLabel || "2\u968E\u5C64\u76EE";
+        if (itemTargets.length > 0 || options.keepEmpty) {
+          normalizedChildren.push({ label: labelValue, items: itemTargets });
+        }
+        return;
+      }
+      const target = normalizeTarget(child.target ?? child);
+      if (target && registerTarget(target)) {
+        const labelValue = childLabel || (target.type === "template" ? getTemplateDefaultLabel(target.templateId) : getNavTargetLabel(target));
+        normalizedChildren.push({ label: labelValue, target });
+        return;
+      }
+      if (options.keepEmpty && childLabel) {
+        normalizedChildren.push({ label: childLabel, items: [] });
+      }
+    });
+    if (normalizedChildren.length > 0 || options.keepEmpty) {
+      normalized.push({ label, children: normalizedChildren });
+    }
+  });
+  if (normalized.length === 0) {
+    return defaultLayout;
+  }
+  return normalized;
+}
+var lastVisitedByGroup = {};
+var lastVisitedByChild = {};
+function renderNavigation(container, activeViewType, onNavigate, hiddenViewTypes = [], navLayout, extras = {}) {
   const hiddenSet = new Set(hiddenViewTypes);
+  const hasEnabledTemplates = Array.isArray(extras.enabledTemplates);
+  const enabledTemplateSet = new Set(extras.enabledTemplates ?? []);
   const nav = container.createEl("div", { cls: "lifeplanner-nav" });
-  const rawActiveGroup = resolveGroup(activeViewType);
-  lastVisitedByGroup[rawActiveGroup.id] = activeViewType;
-  const visibleGroups = NAV_GROUPS.map((group) => {
-    const visibleItems = group.items.filter(
-      (item) => !hiddenSet.has(item.viewType) || item.viewType === activeViewType
-    );
-    return { ...group, items: visibleItems };
-  }).filter((group) => group.items.length > 0);
-  const activeGroup = visibleGroups.find((group) => group.id === rawActiveGroup.id) ?? visibleGroups[0];
+  const layout = normalizeNavLayout(navLayout);
+  const templateLabels = extras.templateLabels;
+  const viewKey = navTargetKey({ type: "view", viewType: activeViewType });
+  const detailKey = extras.activeExerciseSection ? navTargetKey({ type: "exercise", section: extras.activeExerciseSection }) : null;
+  const templateKey = extras.activeTemplateId ? navTargetKey({ type: "template", templateId: extras.activeTemplateId }) : null;
+  const activeKeys = [detailKey, templateKey, viewKey].filter(
+    (key) => Boolean(key)
+  );
+  const isTargetVisible = (target) => {
+    const viewType = getNavTargetViewType(target);
+    if (viewType && hiddenSet.has(viewType) && viewType !== activeViewType) {
+      return false;
+    }
+    if (target.type === "template" && hasEnabledTemplates && !enabledTemplateSet.has(target.templateId) && target.templateId !== extras.activeTemplateId) {
+      return false;
+    }
+    return true;
+  };
+  const childTargets = (child) => navChildHasItems(child) ? child.items : [child.target];
+  const groupTargets = (group) => group.children.flatMap((child) => childTargets(child));
+  const hasTargetKey = (targets, key) => targets.some((target) => navTargetKey(target) === key);
+  const groupHasKey = (group, key) => group.children.some((child) => hasTargetKey(childTargets(child), key));
+  const findTargetByKey = (targets, key) => {
+    if (!key) {
+      return null;
+    }
+    return targets.find((target) => navTargetKey(target) === key) ?? null;
+  };
+  const visibleGroups = layout.map((group) => {
+    const children = group.children.flatMap((child) => {
+      if (navChildHasItems(child)) {
+        const items = child.items.filter((target) => isTargetVisible(target));
+        if (items.length === 0) {
+          return [];
+        }
+        return [{ ...child, items }];
+      }
+      if (!isTargetVisible(child.target)) {
+        return [];
+      }
+      return [child];
+    });
+    return { ...group, children };
+  }).filter((group) => group.children.length > 0);
+  const activeGroup = visibleGroups.find((group) => activeKeys.some((key) => groupHasKey(group, key))) ?? visibleGroups[0];
+  if (!activeGroup) {
+    return;
+  }
+  const activeKey = activeKeys.find((key) => groupHasKey(activeGroup, key)) ?? viewKey;
+  const activeChild = activeGroup.children.find((child) => hasTargetKey(childTargets(child), activeKey)) ?? activeGroup.children[0];
+  if (!activeChild) {
+    return;
+  }
+  lastVisitedByGroup[activeGroup.label] = activeKey;
+  lastVisitedByChild[`${activeGroup.label}::${activeChild.label}`] = activeKey;
   const groupRow = nav.createEl("div", { cls: "lifeplanner-nav-groups" });
   visibleGroups.forEach((group) => {
     const button = groupRow.createEl("button", {
@@ -1170,30 +1468,61 @@ function renderNavigation(container, activeViewType, onNavigate, hiddenViewTypes
       cls: "lifeplanner-nav-group"
     });
     button.setAttr("type", "button");
-    if (activeGroup && group.id === activeGroup.id) {
+    if (group === activeGroup) {
       button.classList.add("is-active");
       button.setAttr("aria-current", "page");
     }
     button.addEventListener("click", () => {
-      const last = lastVisitedByGroup[group.id];
-      const hasLast = Boolean(last && group.items.some((item) => item.viewType === last));
-      const target = (hasLast ? last : group.items[0]?.viewType) ?? activeViewType;
+      const last = lastVisitedByGroup[group.label];
+      const targets = groupTargets(group);
+      const fallbackTarget = { type: "view", viewType: activeViewType };
+      const target = findTargetByKey(targets, last) ?? targets[0] ?? fallbackTarget;
       onNavigate(target);
     });
   });
-  const tabRow = nav.createEl("div", { cls: "lifeplanner-nav-tabs" });
-  (activeGroup?.items ?? []).forEach((item) => {
-    const button = tabRow.createEl("button", {
-      text: item.label,
-      cls: "lifeplanner-nav-tab"
+  const childRow = nav.createEl("div", { cls: "lifeplanner-nav-children" });
+  activeGroup.children.forEach((child) => {
+    const button = childRow.createEl("button", {
+      text: child.label,
+      cls: "lifeplanner-nav-child"
     });
     button.setAttr("type", "button");
-    if (item.viewType === activeViewType) {
+    if (child === activeChild) {
       button.classList.add("is-active");
       button.setAttr("aria-current", "page");
     }
-    button.addEventListener("click", () => onNavigate(item.viewType));
+    button.addEventListener("click", () => {
+      if (navChildHasItems(child)) {
+        const key = `${activeGroup.label}::${child.label}`;
+        const last = lastVisitedByChild[key];
+        const fallbackTarget = { type: "view", viewType: activeViewType };
+        const target = findTargetByKey(child.items, last) ?? child.items[0] ?? fallbackTarget;
+        onNavigate(target);
+        return;
+      }
+      onNavigate(child.target);
+    });
   });
+  const shouldHideTabs = navChildHasItems(activeChild) && activeViewType === EXERCISES_VIEW_TYPE && activeChild.items.length > 0 && activeChild.items.every((target) => target.type === "exercise");
+  if (navChildHasItems(activeChild) && !shouldHideTabs) {
+    nav.classList.add("has-tabs");
+    const activeTabKey = hasTargetKey(activeChild.items, activeKey) ? activeKey : hasTargetKey(activeChild.items, viewKey) ? viewKey : null;
+    const tabRow = nav.createEl("div", { cls: "lifeplanner-nav-tabs" });
+    activeChild.items.forEach((target) => {
+      const label = getNavTargetLabel(target, templateLabels);
+      const button = tabRow.createEl("button", {
+        text: label,
+        cls: "lifeplanner-nav-tab"
+      });
+      button.setAttr("type", "button");
+      const key = navTargetKey(target);
+      if (activeTabKey && key === activeTabKey) {
+        button.classList.add("is-active");
+        button.setAttr("aria-current", "page");
+      }
+      button.addEventListener("click", () => onNavigate(target));
+    });
+  }
 }
 
 // src/ui/weekly_plan_view.ts
@@ -1295,6 +1624,7 @@ var DAY_MS = 24 * 60 * 60 * 1e3;
 var WeeklyPlanRenderer = class {
   constructor(plugin) {
     this.statusEl = null;
+    this.statusTimer = null;
     this.rootEl = null;
     this.viewEl = null;
     this.disposeMenuClose = null;
@@ -1335,6 +1665,10 @@ var WeeklyPlanRenderer = class {
   }
   async onClose() {
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.rootEl = null;
     this.viewEl = null;
     this.disposeMenuClose?.();
@@ -1386,11 +1720,22 @@ var WeeklyPlanRenderer = class {
       nextButton = navButtons.createEl("button", { text: "\u6B21\u9031 \u25B6" });
     }
     if (resolvedOptions.showNavigation) {
-      const onNavigate = resolvedOptions.onNavigate ?? (() => {
+      const onNavigate = resolvedOptions.onNavigate ?? ((target) => {
+        void this.plugin.navigateToTarget(target);
       });
-      renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, onNavigate, resolvedOptions.hiddenViewTypes);
+      renderNavigation(
+        view,
+        WEEKLY_PLAN_VIEW_TYPE,
+        onNavigate,
+        resolvedOptions.hiddenViewTypes,
+        this.plugin.settings.navLayout,
+        {
+          templateLabels: this.plugin.getTemplateLabelMap(),
+          enabledTemplates: this.plugin.settings.enabledTemplates
+        }
+      );
     }
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-weekly-status" });
     this.weekStart = computeWeekStart2(/* @__PURE__ */ new Date(), this.weekOffset, this.plugin.settings.weekStart);
     this.dayOrder = dayOrder(this.plugin.settings.weekStart);
     const plan = await this.loadPlanForWeek(this.weekStart);
@@ -1402,6 +1747,9 @@ var WeeklyPlanRenderer = class {
     await this.renderDailyMemos(view);
     this.renderReflection(view, plan);
     this.updateWeekMeta();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
     if (prevButton) {
       prevButton.addEventListener("click", () => {
         void this.changeWeek(-1);
@@ -2086,9 +2434,15 @@ var WeeklyPlanRenderer = class {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
   scheduleTweetSave(itemId, content) {
     const existing = this.tweetSaveTimers.get(itemId);
@@ -2158,8 +2512,8 @@ var WeeklyPlanView = class extends import_obsidian2.ItemView {
       showNavigation: true,
       showHeader: true,
       attachMenuClose: true,
-      onNavigate: (viewType) => {
-        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      onNavigate: (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
       },
       hiddenViewTypes: this.plugin.settings.hiddenTabs
     });
@@ -2251,6 +2605,7 @@ var DashboardView = class extends import_obsidian3.ItemView {
     this.embeddedWeekly = null;
     this.disposeMenuClose = null;
     this.statusEl = null;
+    this.statusTimer = null;
     this.showControls = false;
     this.plugin = plugin;
   }
@@ -2268,6 +2623,10 @@ var DashboardView = class extends import_obsidian3.ItemView {
     this.disposeMenuClose?.();
     this.disposeMenuClose = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.showControls = false;
     this.contentEl.empty();
   }
@@ -2329,12 +2688,19 @@ var DashboardView = class extends import_obsidian3.ItemView {
     renderNavigation(
       view,
       DASHBOARD_VIEW_TYPE,
-      (viewType) => {
-        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
       },
-      this.plugin.settings.hiddenTabs
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates
+      }
     );
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-dashboard-status" });
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-dashboard-status"
+    });
     const selected = new Set(this.plugin.settings.dashboardSections);
     const controls = view.createEl("div", { cls: "lifeplanner-dashboard-controls" });
     const grid = view.createEl("div", { cls: "lifeplanner-dashboard-grid" });
@@ -2391,12 +2757,18 @@ var DashboardView = class extends import_obsidian3.ItemView {
     if (orderedSections.length === 0 && !this.plugin.settings.showDashboardCalendar) {
       const empty = grid.createEl("div", { cls: "lifeplanner-dashboard-empty" });
       empty.setText("\u8868\u793A\u3059\u308B\u30BB\u30AF\u30B7\u30E7\u30F3\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      if (this.statusEl) {
+        view.appendChild(this.statusEl);
+      }
       return;
     }
     for (const section of orderedSections) {
       const includeHeader = section.viewType !== WEEKLY_PLAN_VIEW_TYPE;
       const body = this.createSection(grid, section.label, includeHeader);
       await this.renderSection(section.viewType, body, services);
+    }
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
     }
   }
   createSection(container, title, includeHeader = true) {
@@ -2833,9 +3205,15 @@ var DashboardView = class extends import_obsidian3.ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
 };
 
@@ -2994,8 +3372,8 @@ function parseTable(content) {
   return rows;
 }
 
-// src/ui/exercises_view.ts
-var EXERCISE_SECTIONS = [
+// src/services/exercise_sections.ts
+var BASE_EXERCISE_SECTIONS = [
   {
     title: "\u4FA1\u5024\u89B3\u5206\u6790",
     defaultBody: "",
@@ -3092,12 +3470,53 @@ var EXERCISE_SECTIONS = [
     ]
   }
 ];
+function buildExerciseSectionTitles(customSections = []) {
+  const titles = BASE_EXERCISE_SECTIONS.map((section) => section.title);
+  const known = new Set(titles.map((title) => title.trim().toLowerCase()));
+  customSections.forEach((section) => {
+    const title = section?.title?.trim() ?? "";
+    if (!title) {
+      return;
+    }
+    const key = title.toLowerCase();
+    if (known.has(key)) {
+      return;
+    }
+    known.add(key);
+    titles.push(title);
+  });
+  return titles;
+}
+
+// src/ui/i18n.ts
+var getPreferredLanguage = () => {
+  if (typeof document !== "undefined") {
+    const docLang = document.documentElement?.lang?.trim();
+    if (docLang) {
+      return docLang.toLowerCase();
+    }
+  }
+  if (typeof navigator !== "undefined") {
+    const navLang = navigator.language?.trim();
+    if (navLang) {
+      return navLang.toLowerCase();
+    }
+  }
+  return "ja";
+};
+var resolveLocalizedText = (text) => {
+  const lang = getPreferredLanguage();
+  return lang.startsWith("en") ? text.en : text.ja;
+};
+
+// src/ui/exercises_view.ts
 var ExercisesView = class extends import_obsidian4.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
-    this.activeSectionTitle = EXERCISE_SECTIONS[0]?.title ?? "";
+    this.statusTimer = null;
+    this.activeSectionTitle = BASE_EXERCISE_SECTIONS[0]?.title ?? "";
     this.disposeMenuClose = null;
     this.plugin = plugin;
     this.exercisesService = new ExercisesService(
@@ -3110,43 +3529,108 @@ var ExercisesView = class extends import_obsidian4.ItemView {
     return EXERCISES_VIEW_TYPE;
   }
   getDisplayText() {
-    return "\u6F14\u7FD2";
+    return resolveLocalizedText({ ja: "\u6F14\u7FD2", en: "Exercises" });
   }
   async onOpen() {
     const container = this.contentEl;
     container.empty();
-    const view = container.createEl("div", { cls: "lifeplanner-view" });
+    const view = container.createEl("div", {
+      cls: "lifeplanner-view lifeplanner-exercises-view"
+    });
     enableTapToBlur(view);
-    view.createEl("h2", { text: "\u6F14\u7FD2" });
-    renderNavigation(view, EXERCISES_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
+    view.createEl("h2", { text: resolveLocalizedText({ ja: "\u6F14\u7FD2", en: "Exercises" }) });
+    const exerciseSections = this.buildExerciseSections();
+    const exerciseSectionTitles = exerciseSections.map((section) => section.title).filter(Boolean);
+    if (exerciseSectionTitles.length > 0 && !exerciseSectionTitles.includes(this.activeSectionTitle)) {
+      this.activeSectionTitle = exerciseSectionTitles[0];
+    }
+    renderNavigation(
+      view,
+      EXERCISES_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+        activeExerciseSection: this.activeSectionTitle,
+        activeTemplateId: BUILTIN_TEMPLATE_BY_VIEW.get(EXERCISES_VIEW_TYPE)
+      }
+    );
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-exercises-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-exercises-list" });
     this.disposeMenuClose = registerRowMenuClose(view);
     await this.renderExercises();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.disposeMenuClose?.();
     this.disposeMenuClose = null;
+  }
+  buildExerciseSections() {
+    const existing = new Set(
+      BASE_EXERCISE_SECTIONS.map((section) => section.title.trim().toLowerCase())
+    );
+    const customSections = this.plugin.settings.customExerciseSections ?? [];
+    const customDefs = [];
+    for (const section of customSections) {
+      const title = section.title?.trim();
+      if (!title) {
+        continue;
+      }
+      const normalized = title.toLowerCase();
+      if (existing.has(normalized)) {
+        continue;
+      }
+      if (!["pairs", "qa", "list"].includes(section.kind)) {
+        continue;
+      }
+      existing.add(normalized);
+      customDefs.push({
+        title,
+        kind: section.kind,
+        defaultBody: ""
+      });
+    }
+    const baseContent = BASE_EXERCISE_SECTIONS.filter((section) => section.kind !== "table");
+    const baseTables = BASE_EXERCISE_SECTIONS.filter((section) => section.kind === "table");
+    return [...baseContent, ...customDefs, ...baseTables];
+  }
+  buildContentSectionDefs(exerciseSections) {
+    return exerciseSections.filter(
+      (section) => section.kind !== "table"
+    ).map((section) => ({
+      title: section.title,
+      defaultBody: section.defaultBody,
+      questions: section.kind === "list" ? section.legacyQuestions : section.questions ?? void 0
+    }));
   }
   async renderExercises() {
     if (!this.listEl) {
       return;
     }
     this.listEl.empty();
-    const contentSections = EXERCISE_SECTIONS.filter(
-      (section) => section.kind !== "table"
-    );
-    const contentSectionDefs = contentSections.map((section) => ({
-      title: section.title,
-      defaultBody: section.defaultBody,
-      questions: section.kind === "questions" ? section.questions : section.kind === "list" ? section.legacyQuestions : section.questions
-    }));
+    const exerciseSections = this.buildExerciseSections();
+    const contentSectionDefs = this.buildContentSectionDefs(exerciseSections);
     const sections = await this.exercisesService.loadSections(contentSectionDefs);
-    const tabs = this.listEl.createEl("div", { cls: "lifeplanner-exercises-tabs" });
+    const hasActive = exerciseSections.some(
+      (sectionDef) => sectionDef.title === this.activeSectionTitle
+    );
+    if (!hasActive && exerciseSections[0]) {
+      this.activeSectionTitle = exerciseSections[0].title;
+    }
+    const tabsRow = this.listEl.createEl("div", { cls: "lifeplanner-exercises-tabs-row" });
+    const tabs = tabsRow.createEl("div", { cls: "lifeplanner-exercises-tabs" });
     const content = this.listEl.createEl("div", { cls: "lifeplanner-exercises-content" });
     const renderSection = async (sectionDef) => {
       content.empty();
@@ -3158,6 +3642,14 @@ var ExercisesView = class extends import_obsidian4.ItemView {
       }
       if (sectionDef.kind === "list") {
         this.renderListSection(section, sectionDef, sections, contentSectionDefs);
+        return;
+      }
+      if (sectionDef.kind === "pairs") {
+        this.renderPairsSection(section, sectionDef, sections, contentSectionDefs);
+        return;
+      }
+      if (sectionDef.kind === "qa") {
+        this.renderQaSection(section, sectionDef, sections, contentSectionDefs);
         return;
       }
       section.createEl("h3", { text: sectionDef.title });
@@ -3211,7 +3703,7 @@ var ExercisesView = class extends import_obsidian4.ItemView {
         });
       }
     };
-    EXERCISE_SECTIONS.forEach((sectionDef) => {
+    exerciseSections.forEach((sectionDef) => {
       const tab = tabs.createEl("button", {
         text: sectionDef.title,
         cls: sectionDef.title === this.activeSectionTitle ? "lifeplanner-exercises-tab is-active" : "lifeplanner-exercises-tab"
@@ -3226,8 +3718,11 @@ var ExercisesView = class extends import_obsidian4.ItemView {
         void renderSection(sectionDef);
       });
     });
-    const initial = EXERCISE_SECTIONS.find((sectionDef) => sectionDef.title === this.activeSectionTitle) ?? EXERCISE_SECTIONS[0];
+    const initial = exerciseSections.find((sectionDef) => sectionDef.title === this.activeSectionTitle) ?? exerciseSections[0];
     if (initial) {
+      if (this.activeSectionTitle !== initial.title) {
+        this.activeSectionTitle = initial.title;
+      }
       await renderSection(initial);
     }
   }
@@ -3361,6 +3856,249 @@ var ExercisesView = class extends import_obsidian4.ItemView {
       persist(false);
     }
   }
+  renderPairsSection(container, sectionDef, sections, sectionDefs) {
+    const rawBody = sections[sectionDef.title] ?? "";
+    const parsed = this.parsePairItems(rawBody);
+    const items = parsed.length > 0 ? parsed.map((item) => ({ ...item })) : [{ key: "", value: "" }];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: sectionDef.title });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-pairs" });
+    const persist = (showStatus) => {
+      sections[sectionDef.title] = this.buildPairBody(items);
+      void this.exercisesService.saveSections(sectionDefs, sections).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((item, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-pair-row" });
+        const keyInput = row.createEl("textarea", { cls: "lifeplanner-exercises-pair-key" });
+        keyInput.rows = 1;
+        keyInput.placeholder = "\u9805\u76EE";
+        keyInput.value = item.key;
+        this.autoResizeTextarea(keyInput);
+        const valueInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-pair-value"
+        });
+        valueInput.rows = 1;
+        valueInput.placeholder = "\u5185\u5BB9";
+        valueInput.value = item.value;
+        this.autoResizeTextarea(valueInput);
+        keyInput.addEventListener("input", () => {
+          items[index].key = keyInput.value;
+          this.autoResizeTextarea(keyInput);
+          persist(true);
+        });
+        valueInput.addEventListener("input", () => {
+          items[index].value = valueInput.value;
+          this.autoResizeTextarea(valueInput);
+          persist(true);
+        });
+        const menuScope = this.listEl ?? container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push({ key: "", value: "" });
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push({ key: "", value: "" });
+      renderRows();
+    });
+    renderRows();
+  }
+  renderQaSection(container, sectionDef, sections, sectionDefs) {
+    const rawBody = sections[sectionDef.title] ?? "";
+    const parsed = this.parseQaItems(rawBody);
+    const items = parsed.length > 0 ? parsed.map((item) => ({ ...item })) : [{ question: "", answer: "" }];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: sectionDef.title });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-qa" });
+    const persist = (showStatus) => {
+      sections[sectionDef.title] = this.buildQaBody(items);
+      void this.exercisesService.saveSections(sectionDefs, sections).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((item, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-qa-row" });
+        const questionInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-qa-question"
+        });
+        questionInput.rows = 1;
+        questionInput.placeholder = "\u8CEA\u554F";
+        questionInput.value = item.question;
+        this.autoResizeTextarea(questionInput);
+        const answerInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-qa-answer"
+        });
+        answerInput.rows = 3;
+        answerInput.placeholder = "\u89E3\u7B54";
+        answerInput.value = item.answer;
+        this.autoResizeTextarea(answerInput);
+        questionInput.addEventListener("input", () => {
+          items[index].question = questionInput.value;
+          this.autoResizeTextarea(questionInput);
+          persist(true);
+        });
+        answerInput.addEventListener("input", () => {
+          items[index].answer = answerInput.value;
+          this.autoResizeTextarea(answerInput);
+          persist(true);
+        });
+        const menuScope = this.listEl ?? container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push({ question: "", answer: "" });
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push({ question: "", answer: "" });
+      renderRows();
+    });
+    renderRows();
+  }
+  parsePairItems(rawBody) {
+    const items = [];
+    const lines = rawBody.split("\n");
+    for (const line of lines) {
+      let value = line.trim();
+      if (!value || value === "-") {
+        continue;
+      }
+      if (value.startsWith("- ")) {
+        value = value.slice(2).trim();
+      }
+      if (!value || value === "-") {
+        continue;
+      }
+      const separatorIndex = value.indexOf(":");
+      if (separatorIndex === -1) {
+        items.push({ key: "", value });
+        continue;
+      }
+      const key = value.slice(0, separatorIndex).trim();
+      const itemValue = value.slice(separatorIndex + 1).trim();
+      if (!key && !itemValue) {
+        continue;
+      }
+      items.push({ key, value: itemValue });
+    }
+    return items;
+  }
+  buildPairBody(items) {
+    const cleaned = items.map((item) => ({
+      key: item.key.replace(/\s*\n\s*/g, " ").trim(),
+      value: item.value.replace(/\s*\n\s*/g, " ").trim()
+    })).filter((item) => item.key.length > 0 || item.value.length > 0);
+    return cleaned.map((item) => {
+      if (!item.key && item.value) {
+        return `- ${item.value}`;
+      }
+      if (item.value) {
+        return `- ${item.key}: ${item.value}`;
+      }
+      return `- ${item.key}:`;
+    }).join("\n");
+  }
+  parseQaItems(rawBody) {
+    const items = [];
+    const lines = rawBody.split("\n");
+    let current = null;
+    const flush = () => {
+      if (!current) {
+        return;
+      }
+      const question = current.question.trim();
+      const answer = current.answerLines.join("\n").trim();
+      if (question || answer) {
+        items.push({ question, answer });
+      }
+      current = null;
+    };
+    for (const line of lines) {
+      if (line.trim().length === 0) {
+        if (current) {
+          current.answerLines.push("");
+        }
+        continue;
+      }
+      if (/^-\s+/.test(line)) {
+        flush();
+        const rawQuestion = line.replace(/^-\s+/, "").trim();
+        let question = rawQuestion;
+        let inlineAnswer = "";
+        const inlineIndex = rawQuestion.indexOf(": ");
+        if (inlineIndex > 0) {
+          const candidateQuestion = rawQuestion.slice(0, inlineIndex).trim();
+          const candidateAnswer = rawQuestion.slice(inlineIndex + 2).trim();
+          if (candidateQuestion && candidateAnswer) {
+            question = candidateQuestion;
+            inlineAnswer = candidateAnswer;
+          }
+        }
+        current = {
+          question,
+          answerLines: inlineAnswer ? [inlineAnswer] : []
+        };
+        continue;
+      }
+      if (!current) {
+        current = { question: line.trim(), answerLines: [] };
+        continue;
+      }
+      current.answerLines.push(line.replace(/^\s+/, "").trimEnd());
+    }
+    flush();
+    return items;
+  }
+  buildQaBody(items) {
+    const lines = [];
+    items.forEach((item) => {
+      const rawQuestion = item.question.replace(/\s*\n\s*/g, " ").trim();
+      const rawAnswer = item.answer.replace(/\s+$/g, "");
+      let question = rawQuestion;
+      let answer = rawAnswer.trim();
+      if (!question && !answer) {
+        return;
+      }
+      if (!question && answer) {
+        const answerLines = answer.split("\n");
+        question = answerLines.shift()?.trim() ?? "";
+        answer = answerLines.join("\n").trim();
+      }
+      if (!question) {
+        return;
+      }
+      lines.push(`- ${question}`);
+      if (answer) {
+        answer.split("\n").forEach((line) => {
+          lines.push(`  ${line.replace(/\s+$/g, "")}`);
+        });
+      }
+    });
+    return lines.join("\n");
+  }
   parseListItems(rawBody, legacyQuestions) {
     const items = [];
     let usedLegacy = false;
@@ -3401,14 +4139,28 @@ var ExercisesView = class extends import_obsidian4.ItemView {
     textarea.style.height = "auto";
     textarea.style.height = `${textarea.scrollHeight}px`;
   }
+  setActiveSection(title) {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return;
+    }
+    this.activeSectionTitle = trimmed;
+    void this.renderExercises();
+  }
   setStatus(message) {
     if (!this.statusEl) {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
 };
 
@@ -3419,6 +4171,7 @@ var GoalTaskView = class extends import_obsidian5.ItemView {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
+    this.statusTimer = null;
     this.viewEl = null;
     this.disposeMenuClose = null;
     this.taskRows = [];
@@ -3451,10 +4204,22 @@ var GoalTaskView = class extends import_obsidian5.ItemView {
     enableTapToBlur(view);
     this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: "\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3" });
-    renderNavigation(view, GOAL_TASK_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-goal-task-status" });
+    renderNavigation(
+      view,
+      GOAL_TASK_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates
+      }
+    );
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-goal-task-status"
+    });
     const section = view.createEl("div", {
       cls: "lifeplanner-weekly-section lifeplanner-action-plan-section"
     });
@@ -3477,6 +4242,9 @@ var GoalTaskView = class extends import_obsidian5.ItemView {
       cls: "lifeplanner-weekly-list lifeplanner-action-plan-list is-hidden"
     });
     const listContext = await this.renderTasks(this.listEl, hiddenList, hiddenWrap, hiddenToggle);
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
     addButton.addEventListener("click", (event) => {
       event.preventDefault();
       if (!listContext) {
@@ -3488,6 +4256,10 @@ var GoalTaskView = class extends import_obsidian5.ItemView {
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.viewEl = null;
     this.disposeMenuClose?.();
     this.disposeMenuClose = null;
@@ -3621,9 +4393,15 @@ var GoalTaskView = class extends import_obsidian5.ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
 };
 
@@ -3643,6 +4421,7 @@ var GoalsView = class extends import_obsidian6.ItemView {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
+    this.statusTimer = null;
     this.parentSelect = null;
     this.descriptionInput = null;
     this.goals = [];
@@ -3669,9 +4448,19 @@ var GoalsView = class extends import_obsidian6.ItemView {
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     enableTapToBlur(view);
     view.createEl("h2", { text: "\u76EE\u6A19" });
-    renderNavigation(view, GOALS_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
+    renderNavigation(
+      view,
+      GOALS_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates
+      }
+    );
     const formWrap = view.createEl("div", { cls: "lifeplanner-goals-form-wrap" });
     this.formWrapEl = formWrap;
     const formToggle = formWrap.createEl("button", {
@@ -3723,7 +4512,7 @@ var GoalsView = class extends import_obsidian6.ItemView {
     });
     actionField.createEl("label", { text: " " });
     const addButton = actionField.createEl("button", { text: "\u8FFD\u52A0" });
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-goals-status" });
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-goals-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-goals-list" });
     let lastAutoDue = resolveDefaultDueDate(levelSelect.value);
     if (!dueInput.value) {
@@ -3784,10 +4573,17 @@ var GoalsView = class extends import_obsidian6.ItemView {
     document.addEventListener("mousedown", this.handleMenuClose, true);
     await this.renderGoals();
     await this.populateParents();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.parentSelect = null;
     this.descriptionInput = null;
     this.goals = [];
@@ -4092,9 +4888,15 @@ var GoalsView = class extends import_obsidian6.ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
   async handleToggleExpanded(node, expanded) {
     await this.goalsService.updateGoal(node.id, { expanded });
@@ -4402,6 +5204,7 @@ var InboxView = class extends import_obsidian7.ItemView {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
+    this.statusTimer = null;
     this.disposeMenuClose = null;
     this.viewEl = null;
     this.plugin = plugin;
@@ -4436,14 +5239,24 @@ var InboxView = class extends import_obsidian7.ItemView {
     this.viewEl = view;
     enableTapToBlur(view);
     view.createEl("h2", { text: "Inbox" });
-    renderNavigation(view, INBOX_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
+    renderNavigation(
+      view,
+      INBOX_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates
+      }
+    );
     const form = view.createEl("div", { cls: "lifeplanner-inbox-form lifeplanner-form" });
     const input = form.createEl("input", { type: "text" });
     input.placeholder = "\u30E1\u30E2\u3092\u5165\u529B";
     const addButton = form.createEl("button", { text: "\u8FFD\u52A0" });
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-inbox-status" });
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-inbox-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-inbox-list" });
     this.disposeMenuClose = registerRowMenuClose(view);
     addButton.addEventListener("click", () => {
@@ -4451,10 +5264,17 @@ var InboxView = class extends import_obsidian7.ItemView {
       input.value = "";
     });
     await this.renderItems();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.viewEl = null;
     this.disposeMenuClose?.();
     this.disposeMenuClose = null;
@@ -4689,9 +5509,15 @@ var InboxView = class extends import_obsidian7.ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
 };
 
@@ -4703,6 +5529,7 @@ var IssuesView = class extends import_obsidian8.ItemView {
     super(leaf);
     this.listEl = null;
     this.statusEl = null;
+    this.statusTimer = null;
     this.issues = [];
     this.handleMenuClose = null;
     this.plugin = plugin;
@@ -4730,10 +5557,20 @@ var IssuesView = class extends import_obsidian8.ItemView {
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     enableTapToBlur(view);
     view.createEl("h2", { text: "\u30A4\u30B7\u30E5\u30FC" });
-    renderNavigation(view, ISSUES_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-issues-status" });
+    renderNavigation(
+      view,
+      ISSUES_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates
+      }
+    );
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-issues-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-kanban" });
     this.handleMenuClose = (event) => {
       const target = event.target;
@@ -4746,11 +5583,18 @@ var IssuesView = class extends import_obsidian8.ItemView {
     };
     document.addEventListener("mousedown", this.handleMenuClose, true);
     await this.renderBoard();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
   async onClose() {
     this.listEl = null;
     this.statusEl = null;
     this.issues = [];
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     if (this.handleMenuClose) {
       document.removeEventListener("mousedown", this.handleMenuClose, true);
       this.handleMenuClose = null;
@@ -4903,9 +5747,15 @@ var IssuesView = class extends import_obsidian8.ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
   }
 };
 var IssueEditModal = class extends import_obsidian8.Modal {
@@ -5076,9 +5926,20 @@ var SimpleSectionView = class extends import_obsidian9.ItemView {
     this.disposeMenuClose = registerRowMenuClose(view);
     const header = view.createEl("div", { cls: "lifeplanner-simple-section-header" });
     header.createEl("h2", { text: this.titleText });
-    renderNavigation(view, this.viewType, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
+    renderNavigation(
+      view,
+      this.viewType,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+        activeTemplateId: BUILTIN_TEMPLATE_BY_VIEW.get(this.viewType)
+      }
+    );
     const body = view.createEl("div", { cls: "lifeplanner-simple-section-body" });
     const hero = body.createEl("div", { cls: "lifeplanner-simple-section-hero" });
     const actions = hero.createEl("div", { cls: "lifeplanner-simple-section-actions" });
@@ -5086,7 +5947,9 @@ var SimpleSectionView = class extends import_obsidian9.ItemView {
       cls: "lifeplanner-simple-section-display lifeplanner-markdown"
     });
     this.inputEl = hero.createEl("textarea", { cls: "lifeplanner-simple-section-input" });
-    this.statusEl = hero.createEl("div", { cls: "lifeplanner-simple-section-status" });
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-simple-section-status"
+    });
     this.inputEl.rows = 12;
     this.inputEl.value = await this.service.load();
     const updateDisplay = () => {
@@ -5143,6 +6006,9 @@ var SimpleSectionView = class extends import_obsidian9.ItemView {
     });
     updateDisplay();
     setEditMode(false);
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
   async onClose() {
     this.statusEl = null;
@@ -5161,10 +6027,12 @@ var SimpleSectionView = class extends import_obsidian9.ItemView {
       return;
     }
     this.statusEl.setText(message);
+    this.statusEl.classList.add("is-visible");
     if (this.statusTimer) {
       window.clearTimeout(this.statusTimer);
     }
     this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
       this.statusTimer = null;
     }, 3500);
@@ -5177,6 +6045,7 @@ var TableSectionView = class extends import_obsidian10.ItemView {
   constructor(leaf, plugin, viewType, type, titleText, columns) {
     super(leaf);
     this.statusEl = null;
+    this.statusTimer = null;
     this.rows = [];
     this.tableEl = null;
     this.enableRowActions = true;
@@ -5210,15 +6079,29 @@ var TableSectionView = class extends import_obsidian10.ItemView {
     enableTapToBlur(view);
     this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: this.titleText });
-    renderNavigation(view, this.viewType, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
+    renderNavigation(
+      view,
+      this.viewType,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+        activeTemplateId: BUILTIN_TEMPLATE_BY_VIEW.get(this.viewType)
+      }
+    );
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-table-status" });
     const header = view.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = header.createEl("button", { text: "\u8FFD\u52A0" });
     this.tableEl = view.createEl("div", { cls: "lifeplanner-table-grid" });
     this.tableEl.dataset.sectionType = this.sectionType;
     await this.renderTable();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
     addButton.addEventListener("click", () => {
       this.rows.push([]);
       void this.save();
@@ -5227,6 +6110,10 @@ var TableSectionView = class extends import_obsidian10.ItemView {
   }
   async onClose() {
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.tableEl = null;
     this.rows = [];
     this.viewEl = null;
@@ -5350,14 +6237,715 @@ var TableSectionView = class extends import_obsidian10.ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2e3);
+      this.statusTimer = null;
+    }, 3500);
+  }
+};
+
+// src/ui/template_section_view.ts
+var import_obsidian11 = require("obsidian");
+
+// src/services/template_section_service.ts
+var TemplateSectionService = class {
+  constructor(repository, templateId, title, baseDir, defaultTags, options = {}) {
+    this.repository = repository;
+    this.templateId = templateId;
+    this.title = title;
+    this.baseDir = baseDir;
+    this.defaultTags = defaultTags;
+    this.selectOptions = (options.selectOptions ?? []).map((option) => option.trim()).filter((option) => option.length > 0);
+  }
+  async load() {
+    const path = resolveTemplateSectionPath(this.templateId, this.baseDir);
+    const content = await this.repository.read(path);
+    if (!content) {
+      await this.repository.write(path, this.serialize(""));
+      return "";
+    }
+    return this.parse(content);
+  }
+  async save(body) {
+    await this.repository.write(
+      resolveTemplateSectionPath(this.templateId, this.baseDir),
+      this.serialize(body)
+    );
+  }
+  serialize(body) {
+    const lines = [];
+    lines.push(...this.buildFrontmatter());
+    lines.push(`# ${this.title}`);
+    lines.push("");
+    if (body.trim().length > 0) {
+      lines.push(body.trim());
+    } else {
+      lines.push("- ");
+    }
+    lines.push("");
+    return lines.join("\n");
+  }
+  buildFrontmatter() {
+    const tags = normalizeTags(this.defaultTags);
+    const hasTags = tags.length > 0;
+    const hasOptions = this.selectOptions.length > 0;
+    if (!hasTags && !hasOptions) {
+      return [];
+    }
+    const frontmatter = ["---"];
+    if (hasTags) {
+      frontmatter.push("tags:");
+      tags.forEach((tag) => {
+        frontmatter.push(`  - ${tag}`);
+      });
+    }
+    if (hasOptions) {
+      frontmatter.push("selectOptions:");
+      this.selectOptions.forEach((option) => {
+        frontmatter.push(`  - ${JSON.stringify(option)}`);
+      });
+    }
+    frontmatter.push("---", "");
+    return frontmatter;
+  }
+  parse(content) {
+    const lines = content.split("\n");
+    const body = [];
+    let started = false;
+    for (const line of lines) {
+      if (line.startsWith("#")) {
+        if (!started) {
+          started = true;
+          continue;
+        }
+      }
+      if (!started) {
+        continue;
+      }
+      body.push(line);
+    }
+    return body.join("\n").trim();
+  }
+};
+
+// src/ui/template_section_view.ts
+var TemplateSectionView = class extends import_obsidian11.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.templateId = "";
+    this.template = null;
+    this.service = null;
+    this.statusEl = null;
+    this.statusTimer = null;
+    this.disposeMenuClose = null;
+    this.inputEl = null;
+    this.displayEl = null;
+    this.plugin = plugin;
+  }
+  getViewType() {
+    return TEMPLATE_SECTION_VIEW_TYPE;
+  }
+  getDisplayText() {
+    return this.template?.label ?? resolveLocalizedText({ ja: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8", en: "Template" });
+  }
+  getState() {
+    return { templateId: this.templateId };
+  }
+  async setState(state) {
+    const nextId = state?.templateId ?? "";
+    if (nextId !== this.templateId) {
+      this.templateId = nextId;
+    }
+    await this.renderView();
+  }
+  async onOpen() {
+    const state = this.leaf.getViewState().state;
+    if (state?.templateId) {
+      this.templateId = state.templateId;
+    }
+    await this.renderView();
+  }
+  async onClose() {
+    this.cleanup();
+  }
+  cleanup() {
+    this.statusEl = null;
+    this.inputEl = null;
+    this.displayEl = null;
+    this.template = null;
+    this.service = null;
+    this.disposeMenuClose?.();
+    this.disposeMenuClose = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
+  }
+  async renderView() {
+    this.cleanup();
+    const container = this.contentEl;
+    container.empty();
+    const view = container.createEl("div", { cls: "lifeplanner-view" });
+    enableTapToBlur(view);
+    this.disposeMenuClose = registerRowMenuClose(view);
+    const template = this.findTemplate();
+    this.template = template;
+    const title = template?.label ?? resolveLocalizedText({ ja: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8", en: "Template" });
+    view.createEl("h2", { text: title });
+    renderNavigation(
+      view,
+      TEMPLATE_SECTION_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+        activeTemplateId: this.templateId
+      }
+    );
+    const body = view.createEl("div", { cls: "lifeplanner-simple-section-body" });
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-template-status"
+    });
+    if (!template) {
+      body.createEl("div", {
+        cls: "lifeplanner-settings-muted",
+        text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002"
+      });
+      return;
+    }
+    this.service = new TemplateSectionService(
+      new MarkdownRepository(this.plugin.app),
+      template.id,
+      template.label,
+      this.plugin.settings.storageDir,
+      this.plugin.settings.defaultTags,
+      {
+        selectOptions: template.format === "select" ? template.selectOptions : void 0
+      }
+    );
+    if (template.format === "free") {
+      await this.renderFreeSection(body);
+    } else if (template.format === "list") {
+      await this.renderListSection(body);
+    } else if (template.format === "pairs") {
+      await this.renderPairsSection(body);
+    } else if (template.format === "select") {
+      await this.renderSelectSection(body, template);
+    } else if (template.format === "qa") {
+      await this.renderQaSection(body);
+    }
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
+  }
+  findTemplate() {
+    if (!this.templateId) {
+      return null;
+    }
+    return this.plugin.settings.customTemplates.find(
+      (template) => template.id === this.templateId
+    ) ?? null;
+  }
+  async renderFreeSection(container) {
+    if (!this.service) {
+      return;
+    }
+    const hero = container.createEl("div", { cls: "lifeplanner-simple-section-hero" });
+    const actions = hero.createEl("div", { cls: "lifeplanner-simple-section-actions" });
+    this.displayEl = hero.createEl("div", {
+      cls: "lifeplanner-simple-section-display lifeplanner-markdown"
+    });
+    this.inputEl = hero.createEl("textarea", { cls: "lifeplanner-simple-section-input" });
+    this.inputEl.rows = 12;
+    this.inputEl.value = await this.service.load();
+    const updateDisplay = () => {
+      if (!this.displayEl || !this.inputEl) {
+        return;
+      }
+      this.displayEl.empty();
+      const value = this.inputEl.value.trim();
+      if (!value) {
+        this.displayEl.setText("(\u672A\u8A18\u5165)");
+        this.displayEl.classList.add("is-empty");
+        return;
+      }
+      this.displayEl.classList.remove("is-empty");
+      void import_obsidian11.MarkdownRenderer.renderMarkdown(value, this.displayEl, "", this);
+    };
+    const setEditMode = (editing) => {
+      if (!this.displayEl || !this.inputEl) {
+        return;
+      }
+      this.inputEl.classList.toggle("lifeplanner-hidden", !editing);
+      this.displayEl.classList.toggle("lifeplanner-hidden", editing);
+      if (editing) {
+        this.inputEl.focus();
+      }
+    };
+    attachRowMenu(actions, container, [
+      {
+        label: "\u7DE8\u96C6",
+        onSelect: () => setEditMode(true)
+      },
+      {
+        label: "\u524A\u9664",
+        onSelect: () => {
+          if (!this.inputEl || !this.service) {
+            return;
+          }
+          this.inputEl.value = "";
+          void this.service.save("");
+          updateDisplay();
+          setEditMode(false);
+          this.setStatus("\u524A\u9664\u3057\u307E\u3057\u305F");
+        }
+      }
+    ]);
+    this.inputEl.addEventListener("input", () => {
+      if (!this.service) {
+        return;
+      }
+      void this.service.save(this.inputEl?.value ?? "");
+      updateDisplay();
+      this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+    });
+    this.inputEl.addEventListener("blur", () => {
+      updateDisplay();
+      setEditMode(false);
+    });
+    updateDisplay();
+    setEditMode(false);
+  }
+  async renderListSection(container) {
+    if (!this.service) {
+      return;
+    }
+    const rawBody = await this.service.load();
+    const parsed = this.parseListItems(rawBody);
+    const items = parsed.length > 0 ? [...parsed] : [""];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: this.template?.label ?? "" });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-list-items" });
+    const persist = (showStatus) => {
+      if (!this.service) {
+        return;
+      }
+      void this.service.save(this.buildListBody(items)).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((value, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-list-row" });
+        const input = row.createEl("textarea", { cls: "lifeplanner-exercises-list-input" });
+        input.rows = 1;
+        input.value = value;
+        this.autoResizeTextarea(input);
+        input.addEventListener("input", () => {
+          items[index] = input.value;
+          this.autoResizeTextarea(input);
+          persist(true);
+        });
+        const menuScope = container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push("");
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push("");
+      renderRows();
+    });
+    renderRows();
+  }
+  async renderPairsSection(container) {
+    if (!this.service) {
+      return;
+    }
+    const rawBody = await this.service.load();
+    const parsed = this.parsePairItems(rawBody);
+    const items = parsed.length > 0 ? parsed.map((item) => ({ ...item })) : [{ key: "", value: "" }];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: this.template?.label ?? "" });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-pairs" });
+    const persist = (showStatus) => {
+      if (!this.service) {
+        return;
+      }
+      void this.service.save(this.buildPairBody(items)).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((item, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-pair-row" });
+        const keyInput = row.createEl("textarea", { cls: "lifeplanner-exercises-pair-key" });
+        keyInput.rows = 1;
+        keyInput.placeholder = "\u9805\u76EE";
+        keyInput.value = item.key;
+        this.autoResizeTextarea(keyInput);
+        const valueInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-pair-value"
+        });
+        valueInput.rows = 1;
+        valueInput.placeholder = "\u5185\u5BB9";
+        valueInput.value = item.value;
+        this.autoResizeTextarea(valueInput);
+        keyInput.addEventListener("input", () => {
+          items[index].key = keyInput.value;
+          this.autoResizeTextarea(keyInput);
+          persist(true);
+        });
+        valueInput.addEventListener("input", () => {
+          items[index].value = valueInput.value;
+          this.autoResizeTextarea(valueInput);
+          persist(true);
+        });
+        const menuScope = container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push({ key: "", value: "" });
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push({ key: "", value: "" });
+      renderRows();
+    });
+    renderRows();
+  }
+  async renderSelectSection(container, template) {
+    if (!this.service) {
+      return;
+    }
+    const rawBody = await this.service.load();
+    const parsed = this.parsePairItems(rawBody);
+    const options = template.selectOptions ?? [];
+    const fallbackKey = options[0] ?? "";
+    const items = parsed.length > 0 ? parsed.map((item) => ({ ...item })) : [{ key: fallbackKey, value: "" }];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: template.label });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-pairs" });
+    const persist = (showStatus) => {
+      if (!this.service) {
+        return;
+      }
+      void this.service.save(this.buildPairBody(items)).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((item, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-pair-row" });
+        const keySelect = row.createEl("select", { cls: "lifeplanner-exercises-pair-key" });
+        const availableOptions = options.includes(item.key) ? options : [...options, item.key].filter((option) => option.length > 0);
+        availableOptions.forEach((option) => {
+          keySelect.createEl("option", { text: option, value: option });
+        });
+        const selectedKey = item.key || fallbackKey;
+        keySelect.value = selectedKey;
+        if (!item.key && selectedKey) {
+          items[index].key = selectedKey;
+        }
+        keySelect.addEventListener("change", () => {
+          items[index].key = keySelect.value;
+          persist(true);
+        });
+        const valueInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-pair-value"
+        });
+        valueInput.rows = 1;
+        valueInput.placeholder = "\u5185\u5BB9";
+        valueInput.value = item.value;
+        this.autoResizeTextarea(valueInput);
+        valueInput.addEventListener("input", () => {
+          items[index].value = valueInput.value;
+          this.autoResizeTextarea(valueInput);
+          persist(true);
+        });
+        const menuScope = container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push({ key: fallbackKey, value: "" });
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push({ key: fallbackKey, value: "" });
+      renderRows();
+    });
+    renderRows();
+  }
+  async renderQaSection(container) {
+    if (!this.service) {
+      return;
+    }
+    const rawBody = await this.service.load();
+    const parsed = this.parseQaItems(rawBody);
+    const items = parsed.length > 0 ? parsed.map((item) => ({ ...item })) : [{ question: "", answer: "" }];
+    const header = container.createEl("div", { cls: "lifeplanner-exercises-list-header" });
+    header.createEl("h3", { text: this.template?.label ?? "" });
+    const actions = header.createEl("div", { cls: "lifeplanner-exercises-list-actions" });
+    const addButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    const list = container.createEl("div", { cls: "lifeplanner-exercises-qa" });
+    const persist = (showStatus) => {
+      if (!this.service) {
+        return;
+      }
+      void this.service.save(this.buildQaBody(items)).then(() => {
+        if (showStatus) {
+          this.setStatus("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+        }
+      });
+    };
+    const renderRows = () => {
+      list.empty();
+      items.forEach((item, index) => {
+        const row = list.createEl("div", { cls: "lifeplanner-exercises-qa-row" });
+        const questionInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-qa-question"
+        });
+        questionInput.rows = 1;
+        questionInput.placeholder = "\u8CEA\u554F";
+        questionInput.value = item.question;
+        this.autoResizeTextarea(questionInput);
+        const answerInput = row.createEl("textarea", {
+          cls: "lifeplanner-exercises-qa-answer"
+        });
+        answerInput.rows = 3;
+        answerInput.placeholder = "\u89E3\u7B54";
+        answerInput.value = item.answer;
+        this.autoResizeTextarea(answerInput);
+        questionInput.addEventListener("input", () => {
+          items[index].question = questionInput.value;
+          this.autoResizeTextarea(questionInput);
+          persist(true);
+        });
+        answerInput.addEventListener("input", () => {
+          items[index].answer = answerInput.value;
+          this.autoResizeTextarea(answerInput);
+          persist(true);
+        });
+        const menuScope = container;
+        attachDeleteMenu(row, menuScope, () => {
+          items.splice(index, 1);
+          if (items.length === 0) {
+            items.push({ question: "", answer: "" });
+          }
+          renderRows();
+          persist(true);
+        });
+      });
+    };
+    addButton.addEventListener("click", () => {
+      items.push({ question: "", answer: "" });
+      renderRows();
+    });
+    renderRows();
+  }
+  parsePairItems(rawBody) {
+    const items = [];
+    const lines = rawBody.split("\n");
+    for (const line of lines) {
+      let value = line.trim();
+      if (!value || value === "-") {
+        continue;
+      }
+      if (value.startsWith("- ")) {
+        value = value.slice(2).trim();
+      }
+      if (!value || value === "-") {
+        continue;
+      }
+      const separatorIndex = value.indexOf(":");
+      if (separatorIndex === -1) {
+        items.push({ key: "", value });
+        continue;
+      }
+      const key = value.slice(0, separatorIndex).trim();
+      const itemValue = value.slice(separatorIndex + 1).trim();
+      if (!key && !itemValue) {
+        continue;
+      }
+      items.push({ key, value: itemValue });
+    }
+    return items;
+  }
+  buildPairBody(items) {
+    const cleaned = items.map((item) => ({
+      key: item.key.replace(/\s*\n\s*/g, " ").trim(),
+      value: item.value.replace(/\s*\n\s*/g, " ").trim()
+    })).filter((item) => item.key.length > 0 || item.value.length > 0);
+    return cleaned.map((item) => {
+      if (!item.key && item.value) {
+        return `- ${item.value}`;
+      }
+      if (item.value) {
+        return `- ${item.key}: ${item.value}`;
+      }
+      return `- ${item.key}:`;
+    }).join("\n");
+  }
+  parseQaItems(rawBody) {
+    const items = [];
+    const lines = rawBody.split("\n");
+    let current = null;
+    const flush = () => {
+      if (!current) {
+        return;
+      }
+      const question = current.question.trim();
+      const answer = current.answerLines.join("\n").trim();
+      if (question || answer) {
+        items.push({ question, answer });
+      }
+      current = null;
+    };
+    for (const line of lines) {
+      if (line.trim().length === 0) {
+        if (current) {
+          current.answerLines.push("");
+        }
+        continue;
+      }
+      if (/^-\s+/.test(line)) {
+        flush();
+        const rawQuestion = line.replace(/^-\s+/, "").trim();
+        let question = rawQuestion;
+        let inlineAnswer = "";
+        const inlineIndex = rawQuestion.indexOf(": ");
+        if (inlineIndex > 0) {
+          const candidateQuestion = rawQuestion.slice(0, inlineIndex).trim();
+          const candidateAnswer = rawQuestion.slice(inlineIndex + 2).trim();
+          if (candidateQuestion && candidateAnswer) {
+            question = candidateQuestion;
+            inlineAnswer = candidateAnswer;
+          }
+        }
+        current = {
+          question,
+          answerLines: inlineAnswer ? [inlineAnswer] : []
+        };
+        continue;
+      }
+      if (!current) {
+        current = { question: line.trim(), answerLines: [] };
+        continue;
+      }
+      current.answerLines.push(line.replace(/^\s+/, "").trimEnd());
+    }
+    flush();
+    return items;
+  }
+  buildQaBody(items) {
+    const lines = [];
+    items.forEach((item) => {
+      const rawQuestion = item.question.replace(/\s*\n\s*/g, " ").trim();
+      const rawAnswer = item.answer.replace(/\s+$/g, "");
+      let question = rawQuestion;
+      let answer = rawAnswer.trim();
+      if (!question && !answer) {
+        return;
+      }
+      if (!question && answer) {
+        const answerLines = answer.split("\n");
+        question = answerLines.shift()?.trim() ?? "";
+        answer = answerLines.join("\n").trim();
+      }
+      if (!question) {
+        return;
+      }
+      lines.push(`- ${question}`);
+      if (answer) {
+        answer.split("\n").forEach((line) => {
+          lines.push(`  ${line.replace(/\s+$/g, "")}`);
+        });
+      }
+    });
+    return lines.join("\n");
+  }
+  parseListItems(rawBody) {
+    const items = [];
+    const lines = rawBody.split("\n");
+    for (const line of lines) {
+      let value = line.trim();
+      if (!value || value === "-") {
+        continue;
+      }
+      if (value.startsWith("- ")) {
+        value = value.slice(2).trim();
+      }
+      if (!value || value === "-") {
+        continue;
+      }
+      items.push(value);
+    }
+    return items;
+  }
+  buildListBody(items) {
+    const cleaned = items.map((item) => item.replace(/\s*\n\s*/g, " ").trim()).filter((item) => item.length > 0);
+    return cleaned.map((item) => `- ${item}`).join("\n");
+  }
+  autoResizeTextarea(textarea) {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+  setStatus(message) {
+    if (!this.statusEl) {
+      return;
+    }
+    this.statusEl.setText(message);
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
+      this.statusEl?.setText("");
+      this.statusTimer = null;
+    }, 3500);
   }
 };
 
 // src/settings.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 var DASHBOARD_SECTION_TYPES = NAV_GROUPS.flatMap(
   (group) => group.items.map((item) => item.viewType)
 ).filter((viewType) => viewType !== DASHBOARD_VIEW_TYPE);
@@ -5371,11 +6959,16 @@ var DEFAULT_SETTINGS = {
   kanbanColumns: ["Backlog", "Todo", "Doing", "Done"],
   actionPlanMinLevel: "\u6708\u9593",
   defaultTags: ["lifeplanner"],
+  customExerciseSections: [],
+  enabledTemplates: [...DEFAULT_TEMPLATE_IDS],
+  templateOrder: [...DEFAULT_TEMPLATE_IDS],
+  customTemplates: [],
   hiddenTabs: [],
+  navLayout: buildDefaultNavLayout(),
   dashboardSections: DEFAULT_DASHBOARD_SECTIONS,
   showDashboardCalendar: true
 };
-var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
+var LifePlannerSettingTab = class extends import_obsidian12.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -5384,13 +6977,13 @@ var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h3", { text: "\u57FA\u672C\u8A2D\u5B9A" });
-    new import_obsidian11.Setting(containerEl).setName("\u9031\u306E\u958B\u59CB\u66DC\u65E5").setDesc("\u9031\u9593\u30D5\u30A1\u30A4\u30EB\u306E\u65E5\u4ED8\u8A08\u7B97\u306B\u4F7F\u7528\u3059\u308B\u958B\u59CB\u66DC\u65E5\u3067\u3059\u3002").addDropdown((dropdown) => {
+    new import_obsidian12.Setting(containerEl).setName("\u9031\u306E\u958B\u59CB\u66DC\u65E5").setDesc("\u9031\u9593\u30D5\u30A1\u30A4\u30EB\u306E\u65E5\u4ED8\u8A08\u7B97\u306B\u4F7F\u7528\u3059\u308B\u958B\u59CB\u66DC\u65E5\u3067\u3059\u3002").addDropdown((dropdown) => {
       dropdown.addOption("monday", "\u6708\u66DC\u59CB\u307E\u308A").addOption("sunday", "\u65E5\u66DC\u59CB\u307E\u308A").setValue(this.plugin.settings.weekStart).onChange(async (value) => {
         this.plugin.settings.weekStart = value;
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian11.Setting(containerEl).setName("\u4FDD\u5B58\u30D5\u30A9\u30EB\u30C0").setDesc("LifePlanner\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u4FDD\u5B58\u3059\u308B\u30D5\u30A9\u30EB\u30C0\u30D1\u30B9\u3067\u3059\u3002").addText((input) => {
+    new import_obsidian12.Setting(containerEl).setName("\u4FDD\u5B58\u30D5\u30A9\u30EB\u30C0").setDesc("LifePlanner\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u4FDD\u5B58\u3059\u308B\u30D5\u30A9\u30EB\u30C0\u30D1\u30B9\u3067\u3059\u3002").addText((input) => {
       input.setPlaceholder("LifePlanner");
       input.setValue(this.plugin.settings.storageDir);
       input.onChange(async (value) => {
@@ -5398,7 +6991,7 @@ var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian11.Setting(containerEl).setName("\u30A4\u30B7\u30E5\u30FC\u306E\u30AB\u30E9\u30E0").setDesc("\u30AB\u30F3\u30DE\u533A\u5207\u308A\u3067\u30AB\u30E9\u30E0\u540D\u3092\u8A2D\u5B9A\u3057\u307E\u3059\u3002").addTextArea((input) => {
+    new import_obsidian12.Setting(containerEl).setName("\u30A4\u30B7\u30E5\u30FC\u306E\u30AB\u30E9\u30E0").setDesc("\u30AB\u30F3\u30DE\u533A\u5207\u308A\u3067\u30AB\u30E9\u30E0\u540D\u3092\u8A2D\u5B9A\u3057\u307E\u3059\u3002").addTextArea((input) => {
       input.setValue(this.plugin.settings.kanbanColumns.join(", "));
       input.onChange(async (value) => {
         const columns = value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
@@ -5406,7 +6999,7 @@ var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian11.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u30BF\u30B0").setDesc("LifePlanner\u3067\u4F5C\u6210/\u66F4\u65B0\u3059\u308BMarkdown\u306B\u4ED8\u4E0E\u3057\u307E\u3059\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09\u3002").addText((input) => {
+    new import_obsidian12.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u30BF\u30B0").setDesc("LifePlanner\u3067\u4F5C\u6210/\u66F4\u65B0\u3059\u308BMarkdown\u306B\u4ED8\u4E0E\u3057\u307E\u3059\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09\u3002").addText((input) => {
       input.setPlaceholder("lifeplanner");
       input.setValue(this.plugin.settings.defaultTags.join(", "));
       input.onChange(async (value) => {
@@ -5415,7 +7008,7 @@ var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian11.Setting(containerEl).setName("\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3\u306E\u6700\u5C0F\u968E\u5C64").setDesc("\u3053\u306E\u968E\u5C64\u4EE5\u4E0B\u306E\u76EE\u6A19\u3092\u5019\u88DC\u306B\u8868\u793A\u3057\u307E\u3059\u3002").addDropdown((dropdown) => {
+    new import_obsidian12.Setting(containerEl).setName("\u30A2\u30AF\u30B7\u30E7\u30F3\u30D7\u30E9\u30F3\u306E\u6700\u5C0F\u968E\u5C64").setDesc("\u3053\u306E\u968E\u5C64\u4EE5\u4E0B\u306E\u76EE\u6A19\u3092\u5019\u88DC\u306B\u8868\u793A\u3057\u307E\u3059\u3002").addDropdown((dropdown) => {
       ["\u4EBA\u751F", "\u9577\u671F", "\u4E2D\u671F", "\u5E74\u9593", "\u56DB\u534A\u671F", "\u6708\u9593", "\u9031\u9593"].forEach((level) => {
         dropdown.addOption(level, level);
       });
@@ -5426,37 +7019,926 @@ var LifePlannerSettingTab = class extends import_obsidian11.PluginSettingTab {
       });
     });
     containerEl.createEl("h3", { text: "\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9" });
-    new import_obsidian11.Setting(containerEl).setName("\u30DF\u30CB\u30AB\u30EC\u30F3\u30C0\u30FC\u8868\u793A").setDesc("\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9\u306B\u6708\u9593\u30AB\u30EC\u30F3\u30C0\u30FC\u3092\u8868\u793A\u3057\u307E\u3059\u3002").addToggle((toggle) => {
+    new import_obsidian12.Setting(containerEl).setName("\u30DF\u30CB\u30AB\u30EC\u30F3\u30C0\u30FC\u8868\u793A").setDesc("\u30C0\u30C3\u30B7\u30E5\u30DC\u30FC\u30C9\u306B\u6708\u9593\u30AB\u30EC\u30F3\u30C0\u30FC\u3092\u8868\u793A\u3057\u307E\u3059\u3002").addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.showDashboardCalendar);
       toggle.onChange(async (value) => {
         this.plugin.settings.showDashboardCalendar = value;
         await this.plugin.saveSettings();
       });
     });
-    containerEl.createEl("h3", { text: "\u30BF\u30D6\u8868\u793A" });
-    NAV_GROUPS.forEach((group) => {
-      containerEl.createEl("h4", { text: group.label });
-      group.items.forEach((item) => {
-        new import_obsidian11.Setting(containerEl).setName(item.label).setDesc("\u8868\u793A/\u975E\u8868\u793A").addToggle((toggle) => {
-          toggle.setValue(!this.plugin.settings.hiddenTabs.includes(item.viewType));
-          toggle.onChange(async (value) => {
-            const hidden = new Set(this.plugin.settings.hiddenTabs);
-            if (value) {
-              hidden.delete(item.viewType);
-            } else {
-              hidden.add(item.viewType);
+    containerEl.createEl("h3", { text: "\u30BF\u30D6/\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u8A2D\u5B9A" });
+    containerEl.createEl("p", {
+      cls: "lifeplanner-settings-hint",
+      text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u306E\u8FFD\u52A0\u30FB\u7DE8\u96C6\u306F\u3053\u3053\u3067\u3001\u30BF\u30D6\u306E\u8868\u793A/\u4E26\u3073\u66FF\u3048\u306F\u4E0B\u306E\u30BF\u30D6\u69CB\u6210\u3067\u8A2D\u5B9A\u3057\u307E\u3059\u3002\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u306F\u30BF\u30D6\u306B\u5272\u308A\u5F53\u3066\u308B\u3068\u5165\u529B\u753B\u9762\u304C\u958B\u304D\u307E\u3059\u3002"
+    });
+    this.renderNavigationSettings(containerEl);
+  }
+  renderTemplateSettings(containerEl, options = {}) {
+    const headingTag = options.headingTag ?? "h3";
+    containerEl.createEl(headingTag, { text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8" });
+    if (options.includeHint !== false) {
+      containerEl.createEl("p", {
+        cls: "lifeplanner-settings-hint",
+        text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u306F5\u3064\u306E\u5F62\u5F0F\u304B\u3089\u4F5C\u6210\u3067\u304D\u307E\u3059\u3002\u65B0\u898F\u8FFD\u52A0\u30FB\u7DE8\u96C6\u30FB\u524A\u9664\u304C\u3067\u304D\u307E\u3059\u3002"
+      });
+    }
+    const section = containerEl.createEl("div");
+    const actions = section.createEl("div");
+    const addButton = actions.createEl("button", { text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u3092\u8FFD\u52A0" });
+    addButton.setAttr("type", "button");
+    const list = section.createEl("div", { cls: "lifeplanner-settings-block" });
+    const notifyTemplatesUpdated = () => {
+      options.onTemplatesUpdated?.();
+    };
+    const ensureTemplateFile = async (entry) => {
+      const service = new TemplateSectionService(
+        new MarkdownRepository(this.app),
+        entry.id,
+        entry.label,
+        this.plugin.settings.storageDir,
+        this.plugin.settings.defaultTags,
+        {
+          selectOptions: entry.format === "select" ? entry.selectOptions : void 0
+        }
+      );
+      await service.load();
+    };
+    const deleteTemplateFile = async (templateId) => {
+      const path = resolveTemplateSectionPath(templateId, this.plugin.settings.storageDir);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file && file instanceof import_obsidian12.TFile) {
+        const vault = this.app.vault;
+        if (typeof vault.trash === "function") {
+          await vault.trash(file, true);
+        } else {
+          await vault.delete(file);
+        }
+      }
+    };
+    const removeTemplateFromLayout = (layout, templateId) => layout.map((group) => {
+      const children = group.children.flatMap((child) => {
+        if (navChildHasItems(child)) {
+          const items = child.items.filter(
+            (item) => !(item.type === "template" && item.templateId === templateId)
+          );
+          return [{ ...child, items }];
+        }
+        if (child.target.type === "template" && child.target.templateId === templateId) {
+          return [];
+        }
+        return [child];
+      });
+      return { ...group, children };
+    });
+    const orderEntries = (entries) => {
+      const order = Array.isArray(this.plugin.settings.templateOrder) ? this.plugin.settings.templateOrder : [];
+      const map = new Map(entries.map((entry) => [entry.id, entry]));
+      const ordered = [];
+      order.forEach((id) => {
+        const entry = map.get(id);
+        if (entry) {
+          ordered.push(entry);
+          map.delete(id);
+        }
+      });
+      map.forEach((entry) => ordered.push(entry));
+      return ordered;
+    };
+    const getEntries = () => getAllTemplates(this.plugin.settings.customTemplates ?? []);
+    const renderList = () => {
+      list.empty();
+      const entries = orderEntries(getEntries());
+      if (entries.length === 0) {
+        list.createEl("div", { text: "(\u306A\u3057)", cls: "lifeplanner-settings-muted" });
+        return;
+      }
+      entries.forEach((entry) => {
+        const isBuiltin = isBuiltinTemplateId(entry.id);
+        const sourceLabel = isBuiltin ? "\u6A19\u6E96" : "\u8FFD\u52A0";
+        const formatLabel = "viewType" in entry ? entry.formatLabel : TEMPLATE_FORMAT_LABELS[entry.format];
+        const setting = new import_obsidian12.Setting(list).setName(entry.label).setDesc(`${sourceLabel} / ${formatLabel}`);
+        if (!isBuiltin) {
+          setting.addButton((button) => {
+            button.setButtonText("\u7DE8\u96C6");
+            button.onClick(() => {
+              const modal = new TemplateEditModal(this.app, entry, async (updated) => {
+                const updatedTemplates = (this.plugin.settings.customTemplates ?? []).map(
+                  (custom) => custom.id === entry.id ? updated : custom
+                );
+                this.plugin.settings.customTemplates = updatedTemplates;
+                await this.plugin.saveSettings();
+                renderList();
+                notifyTemplatesUpdated();
+              });
+              modal.open();
+            });
+          });
+          setting.addButton((button) => {
+            button.setButtonText("\u524A\u9664");
+            button.onClick(async () => {
+              const modal = new TemplateDeleteModal(this.app, entry, async (deleteFile) => {
+                const nextCustom = (this.plugin.settings.customTemplates ?? []).filter(
+                  (custom) => custom.id !== entry.id
+                );
+                const nextEnabled = (this.plugin.settings.enabledTemplates ?? []).filter(
+                  (id) => id !== entry.id
+                );
+                const nextOrder = (this.plugin.settings.templateOrder ?? []).filter(
+                  (id) => id !== entry.id
+                );
+                this.plugin.settings.customTemplates = nextCustom;
+                this.plugin.settings.enabledTemplates = nextEnabled;
+                this.plugin.settings.templateOrder = nextOrder;
+                this.plugin.settings.navLayout = normalizeNavLayout(
+                  removeTemplateFromLayout(this.plugin.settings.navLayout, entry.id),
+                  { keepEmpty: true }
+                );
+                await this.plugin.saveSettings();
+                if (deleteFile) {
+                  await deleteTemplateFile(entry.id);
+                }
+                renderList();
+                notifyTemplatesUpdated();
+              });
+              modal.open();
+            });
+          });
+        }
+      });
+    };
+    addButton.addEventListener("click", () => {
+      const entries = getEntries();
+      const existingLabels = new Set(
+        entries.map((entry) => entry.label.trim().toLowerCase()).filter((label) => label.length > 0)
+      );
+      const existingIds = new Set(entries.map((entry) => entry.id));
+      const modal = new TemplateAddModal(
+        this.app,
+        existingLabels,
+        existingIds,
+        async (entry) => {
+          const custom = [...this.plugin.settings.customTemplates ?? [], entry];
+          const currentEnabled = this.plugin.settings.enabledTemplates ?? [];
+          const enabled = new Set(currentEnabled);
+          if (currentEnabled.length > 0) {
+            enabled.add(entry.id);
+          }
+          const order = [...this.plugin.settings.templateOrder ?? []].filter(
+            (id) => id !== entry.id
+          );
+          order.push(entry.id);
+          this.plugin.settings.customTemplates = custom;
+          this.plugin.settings.enabledTemplates = currentEnabled.length === 0 ? [] : Array.from(enabled);
+          this.plugin.settings.templateOrder = order;
+          await this.plugin.saveSettings();
+          await ensureTemplateFile(entry);
+          renderList();
+          notifyTemplatesUpdated();
+        }
+      );
+      modal.open();
+    });
+    renderList();
+  }
+  renderNavigationSettings(containerEl) {
+    const templateSection = containerEl.createEl("div");
+    const navSection = containerEl.createEl("div");
+    const allViewTypes = NAV_GROUPS.flatMap((group) => group.items.map((item) => item.viewType));
+    const templateViewTypes = new Set(
+      BUILTIN_TEMPLATES.map((template) => template.viewType)
+    );
+    const systemViewTypes = allViewTypes.filter((viewType) => !templateViewTypes.has(viewType));
+    const orderTemplates = (entries) => {
+      const order = Array.isArray(this.plugin.settings.templateOrder) ? this.plugin.settings.templateOrder : [];
+      const map = new Map(entries.map((entry) => [entry.id, entry]));
+      const ordered = [];
+      order.forEach((id) => {
+        const entry = map.get(id);
+        if (entry) {
+          ordered.push(entry);
+          map.delete(id);
+        }
+      });
+      map.forEach((entry) => ordered.push(entry));
+      return ordered;
+    };
+    const getTemplateEntries = () => getAllTemplates(this.plugin.settings.customTemplates ?? []);
+    const getOrderedTemplates = () => orderTemplates(getTemplateEntries());
+    const getTemplateLabels = () => new Map(getTemplateEntries().map((entry) => [entry.id, entry.label]));
+    const getExerciseTargets = () => buildExerciseSectionTitles(this.plugin.settings.customExerciseSections ?? []).map(
+      (title) => ({ type: "exercise", section: title })
+    );
+    const exercisesTemplateId = BUILTIN_TEMPLATE_BY_VIEW.get(EXERCISES_VIEW_TYPE) ?? "";
+    const exercisesLabel = getNavItemLabel(EXERCISES_VIEW_TYPE) || (exercisesTemplateId ? getTemplateLabels().get(exercisesTemplateId) ?? "\u6F14\u7FD2" : "\u6F14\u7FD2");
+    const isExercisesTarget = (target) => target.type === "view" && target.viewType === EXERCISES_VIEW_TYPE || target.type === "template" && target.templateId === exercisesTemplateId;
+    const matchesExercisesLabel = (label) => {
+      const trimmed = label.trim();
+      if (!trimmed) {
+        return false;
+      }
+      if (trimmed === exercisesLabel) {
+        return true;
+      }
+      if (exercisesLabel && trimmed.includes(exercisesLabel)) {
+        return true;
+      }
+      return trimmed.includes("\u6F14\u7FD2");
+    };
+    const getExercisesFallbackTarget = () => exercisesTemplateId ? { type: "template", templateId: exercisesTemplateId } : { type: "view", viewType: EXERCISES_VIEW_TYPE };
+    const moveItem = (items, from, to) => {
+      if (from === to) {
+        return items;
+      }
+      const next = [...items];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    };
+    const ensureUniqueLabel = (base, existing) => {
+      let label = base;
+      let index = 2;
+      while (existing.has(label)) {
+        label = `${base}${index}`;
+        index += 1;
+      }
+      return label;
+    };
+    const collectTargets = (layout) => layout.flatMap(
+      (group) => group.children.flatMap(
+        (child) => navChildHasItems(child) ? child.items : [child.target]
+      )
+    );
+    const buildTargetOptions = (existingKeys, includeKey) => {
+      const options = {};
+      systemViewTypes.forEach((viewType) => {
+        const target = { type: "view", viewType };
+        const key = navTargetKey(target);
+        if (existingKeys.has(key) && key !== includeKey) {
+          return;
+        }
+        options[key] = `\u30D3\u30E5\u30FC: ${getNavItemLabel(viewType)}`;
+      });
+      getOrderedTemplates().forEach((entry) => {
+        const target = { type: "template", templateId: entry.id };
+        const key = navTargetKey(target);
+        if (existingKeys.has(key) && key !== includeKey) {
+          return;
+        }
+        options[key] = `\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8: ${entry.label}`;
+      });
+      getExerciseTargets().forEach((target) => {
+        const key = navTargetKey(target);
+        if (existingKeys.has(key) && key !== includeKey) {
+          return;
+        }
+        options[key] = `\u6F14\u7FD2: ${target.section}`;
+      });
+      return options;
+    };
+    const getTargetTypeLabel = (target) => {
+      switch (target.type) {
+        case "view":
+          return "\u30D3\u30E5\u30FC";
+        case "template":
+          return "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8";
+        case "exercise":
+          return "\u6F14\u7FD2";
+        default:
+          return "";
+      }
+    };
+    let renderNav = () => {
+    };
+    const persistLayout = (layout, options = {}) => {
+      this.plugin.settings.navLayout = normalizeNavLayout(layout, { keepEmpty: true });
+      void this.plugin.saveSettings();
+      if (options.rerender !== false) {
+        renderNav();
+      }
+    };
+    renderNav = () => {
+      navSection.empty();
+      navSection.createEl("h4", { text: "\u30BF\u30D6\u69CB\u6210" });
+      navSection.createEl("p", {
+        cls: "lifeplanner-settings-hint",
+        text: "1\u968E\u5C64\u76EE=\u4E0A\u6BB5\u30012\u968E\u5C64\u76EE=\u4E2D\u6BB5\u30013\u968E\u5C64\u76EE=\u4E0B\u6BB5\u306E\u30BF\u30D6\u3067\u3059\u30023\u968E\u5C64\u76EE\u306F\u30BB\u30AF\u30B7\u30E7\u30F3\u3068\u3057\u3066\u4E26\u3073\u30012\u968E\u5C64\u76EE\u3067\u8FFD\u52A0\u3059\u308B\u3068\u8868\u793A\u3055\u308C\u307E\u3059\u3002"
+      });
+      const section = navSection.createEl("div");
+      const navWrap = section.createEl("div");
+      const exerciseTargets = getExerciseTargets();
+      const resolveChildGroupLabel = (label, fallback) => {
+        const trimmed = label.trim();
+        if (trimmed && trimmed !== "\u30E1\u30A4\u30F3") {
+          return trimmed;
+        }
+        return fallback || "2\u968E\u5C64\u76EE";
+      };
+      const ensureExercisesHaveItems = (layout2) => {
+        let changed = false;
+        const next = layout2.map((group) => {
+          const children = group.children.map((child) => {
+            if (navChildHasItems(child)) {
+              return child;
             }
-            this.plugin.settings.hiddenTabs = Array.from(hidden);
-            await this.plugin.saveSettings();
+            const target = child.target;
+            if (!target) {
+              return child;
+            }
+            if (isExercisesTarget(target) || matchesExercisesLabel(child.label)) {
+              const label = resolveChildGroupLabel(child.label, exercisesLabel);
+              changed = true;
+              return { label, items: exerciseTargets };
+            }
+            return child;
+          });
+          return { ...group, children };
+        });
+        return { layout: changed ? next : layout2, changed };
+      };
+      const normalizedLayout = normalizeNavLayout(this.plugin.settings.navLayout, {
+        keepEmpty: true
+      });
+      const ensured = ensureExercisesHaveItems(normalizedLayout);
+      if (ensured.changed) {
+        persistLayout(ensured.layout);
+        return;
+      }
+      const layout = normalizedLayout;
+      const hidden = new Set(this.plugin.settings.hiddenTabs ?? []);
+      const templateLabels = getTemplateLabels();
+      const existingKeys = new Set(collectTargets(layout).map((target) => navTargetKey(target)));
+      const buildIndexedLabel = (prefix, existing, startIndex = 1) => {
+        let index = startIndex;
+        while (existing.has(`${prefix}${index}`)) {
+          index += 1;
+        }
+        return `${prefix}${index}`;
+      };
+      layout.forEach((group, groupIndex) => {
+        const groupBlock = navWrap.createEl("div", { cls: "lifeplanner-nav-settings-group" });
+        groupBlock.createEl("div", {
+          text: "1\u968E\u5C64\u76EE",
+          cls: "lifeplanner-nav-settings-label"
+        });
+        const groupSetting = new import_obsidian12.Setting(groupBlock).setName("1\u968E\u5C64\u76EE");
+        groupSetting.addText((input) => {
+          input.setValue(group.label);
+          input.onChange((value) => {
+            const label = value.trim() || group.label;
+            layout[groupIndex] = { ...group, label };
+            persistLayout(layout, { rerender: false });
+          });
+          input.inputEl.addEventListener("blur", () => {
+            renderNav();
+          });
+        });
+        groupSetting.addButton((button) => {
+          button.setButtonText("\u4E0A\u3078");
+          button.onClick(() => {
+            if (groupIndex === 0) {
+              return;
+            }
+            const next = moveItem(layout, groupIndex, groupIndex - 1);
+            persistLayout(next);
+          });
+        });
+        groupSetting.addButton((button) => {
+          button.setButtonText("\u4E0B\u3078");
+          button.onClick(() => {
+            if (groupIndex >= layout.length - 1) {
+              return;
+            }
+            const next = moveItem(layout, groupIndex, groupIndex + 1);
+            persistLayout(next);
+          });
+        });
+        groupSetting.addButton((button) => {
+          button.setButtonText("\u524A\u9664");
+          button.onClick(() => {
+            if (layout.length <= 1) {
+              return;
+            }
+            const next = layout.filter((_, index) => index !== groupIndex);
+            persistLayout(next);
+          });
+        });
+        const childList = groupBlock.createEl("div", {
+          cls: "lifeplanner-nav-settings-children"
+        });
+        group.children.forEach((child, childIndex) => {
+          const childBlock = childList.createEl("div", {
+            cls: "lifeplanner-nav-settings-child"
+          });
+          childBlock.createEl("div", {
+            text: "2\u968E\u5C64\u76EE",
+            cls: "lifeplanner-nav-settings-label"
+          });
+          const childSetting = new import_obsidian12.Setting(childBlock).setName("2\u968E\u5C64\u76EE").setDesc(navChildHasItems(child) ? "3\u968E\u5C64\u76EE\u3042\u308A" : "\u5358\u72EC\u30BF\u30D6");
+          childSetting.addText((input) => {
+            input.setValue(child.label);
+            input.onChange((value) => {
+              const label = value.trim() || child.label;
+              const children = [...group.children];
+              children[childIndex] = { ...child, label };
+              layout[groupIndex] = { ...group, children };
+              persistLayout(layout, { rerender: false });
+            });
+            input.inputEl.addEventListener("blur", () => {
+              renderNav();
+            });
+          });
+          const collapseToTarget = (fallback) => {
+            const target = fallback ?? getExercisesFallbackTarget();
+            const next = [...layout];
+            const children = [...group.children];
+            children[childIndex] = { label: child.label, target };
+            next[groupIndex] = { ...group, children };
+            persistLayout(next);
+          };
+          if (!navChildHasItems(child)) {
+            const isExercisesChild = isExercisesTarget(child.target) || matchesExercisesLabel(child.label);
+            childSetting.addButton((button) => {
+              button.setButtonText(isExercisesChild ? "3\u968E\u5C64\u76EE\u3092\u30AB\u30B9\u30BF\u30E0\u7DE8\u96C6" : "3\u968E\u5C64\u76EE\u3092\u8FFD\u52A0");
+              button.onClick(() => {
+                const next = [...layout];
+                const children = [...group.children];
+                const nextLabel = resolveChildGroupLabel(
+                  child.label,
+                  getNavTargetLabel(child.target, templateLabels)
+                );
+                const items = isExercisesTarget(child.target) ? exerciseTargets : [child.target];
+                children[childIndex] = { label: nextLabel, items };
+                next[groupIndex] = { ...group, children };
+                persistLayout(next);
+              });
+            });
+          } else {
+            const hasExerciseItems = child.items.some((item) => item.type === "exercise");
+            const isExercisesGroup = hasExerciseItems || matchesExercisesLabel(child.label);
+            childSetting.addButton((button) => {
+              button.setButtonText("3\u968E\u5C64\u76EE\u3092\u89E3\u9664");
+              button.onClick(() => {
+                const fallback = child.items.find((item) => item.type !== "exercise") ?? child.items[0];
+                collapseToTarget(fallback);
+              });
+            });
+          }
+          childSetting.addButton((button) => {
+            button.setButtonText("\u4E0A\u3078");
+            button.onClick(() => {
+              if (childIndex === 0) {
+                return;
+              }
+              const next = [...layout];
+              const children = moveItem(group.children, childIndex, childIndex - 1);
+              next[groupIndex] = { ...group, children };
+              persistLayout(next);
+            });
+          });
+          childSetting.addButton((button) => {
+            button.setButtonText("\u4E0B\u3078");
+            button.onClick(() => {
+              if (childIndex >= group.children.length - 1) {
+                return;
+              }
+              const next = [...layout];
+              const children = moveItem(group.children, childIndex, childIndex + 1);
+              next[groupIndex] = { ...group, children };
+              persistLayout(next);
+            });
+          });
+          childSetting.addButton((button) => {
+            button.setButtonText("\u524A\u9664");
+            button.onClick(() => {
+              const next = [...layout];
+              const children = group.children.filter((_, idx) => idx !== childIndex);
+              next[groupIndex] = { ...group, children };
+              persistLayout(next);
+            });
+          });
+          if (navChildHasItems(child)) {
+            const itemList = childBlock.createEl("div", {
+              cls: "lifeplanner-nav-settings-items"
+            });
+            child.items.forEach((target, itemIndex) => {
+              const itemRow = itemList.createEl("div", {
+                cls: "lifeplanner-nav-settings-item"
+              });
+              itemRow.createEl("div", {
+                text: "3\u968E\u5C64\u76EE",
+                cls: "lifeplanner-nav-settings-label"
+              });
+              const itemSetting = new import_obsidian12.Setting(itemRow).setName(getNavTargetLabel(target, templateLabels)).setDesc(getTargetTypeLabel(target));
+              if (target.type === "view") {
+                const viewType = target.viewType;
+                itemSetting.addToggle((toggle) => {
+                  toggle.setValue(!hidden.has(viewType));
+                  toggle.onChange(async (value) => {
+                    const nextHidden = new Set(this.plugin.settings.hiddenTabs ?? []);
+                    if (value) {
+                      nextHidden.delete(viewType);
+                    } else {
+                      nextHidden.add(viewType);
+                    }
+                    this.plugin.settings.hiddenTabs = Array.from(nextHidden);
+                    await this.plugin.saveSettings();
+                  });
+                });
+              }
+              itemSetting.addButton((button) => {
+                button.setButtonText("\u4E0A\u3078");
+                button.onClick(() => {
+                  if (itemIndex === 0) {
+                    return;
+                  }
+                  const next = [...layout];
+                  const children = [...group.children];
+                  const items = moveItem(child.items, itemIndex, itemIndex - 1);
+                  children[childIndex] = { ...child, items };
+                  next[groupIndex] = { ...group, children };
+                  persistLayout(next);
+                });
+              });
+              itemSetting.addButton((button) => {
+                button.setButtonText("\u4E0B\u3078");
+                button.onClick(() => {
+                  if (itemIndex >= child.items.length - 1) {
+                    return;
+                  }
+                  const next = [...layout];
+                  const children = [...group.children];
+                  const items = moveItem(child.items, itemIndex, itemIndex + 1);
+                  children[childIndex] = { ...child, items };
+                  next[groupIndex] = { ...group, children };
+                  persistLayout(next);
+                });
+              });
+              itemSetting.addButton((button) => {
+                button.setButtonText("\u524A\u9664");
+                button.onClick(() => {
+                  const next = [...layout];
+                  const children = [...group.children];
+                  const items = child.items.filter((_, idx) => idx !== itemIndex);
+                  if (items.length === 0) {
+                    const fallback = target.type === "exercise" ? getExercisesFallbackTarget() : target;
+                    children[childIndex] = { label: child.label, target: fallback };
+                  } else {
+                    children[childIndex] = { ...child, items };
+                  }
+                  next[groupIndex] = { ...group, children };
+                  persistLayout(next);
+                });
+              });
+            });
+            const addItemSetting = new import_obsidian12.Setting(itemList).setName("3\u968E\u5C64\u76EE\u8FFD\u52A0");
+            const options = buildTargetOptions(existingKeys);
+            if (Object.keys(options).length === 0) {
+              addItemSetting.setDesc("\u8FFD\u52A0\u3067\u304D\u308B\u30BF\u30D6\u304C\u3042\u308A\u307E\u305B\u3093");
+            } else {
+              addItemSetting.addDropdown((dropdown) => {
+                dropdown.addOption("", "\u8FFD\u52A0\u3059\u308B\u30BF\u30D6\u3092\u9078\u629E");
+                Object.entries(options).forEach(([key, label]) => {
+                  dropdown.addOption(key, label);
+                });
+                dropdown.onChange((value) => {
+                  if (!value) {
+                    return;
+                  }
+                  const target = navTargetFromKey(value);
+                  if (!target) {
+                    return;
+                  }
+                  const next = [...layout];
+                  const children = [...group.children];
+                  const items = [...child.items, target];
+                  children[childIndex] = { ...child, items };
+                  next[groupIndex] = { ...group, children };
+                  persistLayout(next);
+                });
+              });
+            }
+          } else {
+            const targetSetting = new import_obsidian12.Setting(childBlock).setName("2\u968E\u5C64\u76EE\u306E\u5185\u5BB9").setDesc("\u3053\u3053\u306B\u8868\u793A\u3059\u308B\u30BF\u30D6\u3092\u9078\u3073\u307E\u3059\u3002");
+            const currentKey = navTargetKey(child.target);
+            const options = buildTargetOptions(existingKeys, currentKey);
+            targetSetting.addDropdown((dropdown) => {
+              dropdown.addOptions(options);
+              dropdown.setValue(currentKey);
+              dropdown.onChange((value) => {
+                const target = navTargetFromKey(value);
+                if (!target) {
+                  return;
+                }
+                const prevLabel = child.label;
+                const prevTargetLabel = getNavTargetLabel(child.target, templateLabels);
+                const nextTargetLabel = getNavTargetLabel(target, templateLabels);
+                const nextLabel = prevLabel === prevTargetLabel ? nextTargetLabel : prevLabel;
+                const next = [...layout];
+                const children = [...group.children];
+                children[childIndex] = { ...child, label: nextLabel, target };
+                next[groupIndex] = { ...group, children };
+                persistLayout(next);
+              });
+            });
+            if (child.target.type === "view") {
+              const viewType = child.target.viewType;
+              targetSetting.addToggle((toggle) => {
+                toggle.setValue(!hidden.has(viewType));
+                toggle.onChange(async (value) => {
+                  const nextHidden = new Set(this.plugin.settings.hiddenTabs ?? []);
+                  if (value) {
+                    nextHidden.delete(viewType);
+                  } else {
+                    nextHidden.add(viewType);
+                  }
+                  this.plugin.settings.hiddenTabs = Array.from(nextHidden);
+                  await this.plugin.saveSettings();
+                });
+              });
+            }
+          }
+        });
+        const addChildSetting = new import_obsidian12.Setting(groupBlock).setName("2\u968E\u5C64\u76EE\uFF08\u5358\u72EC\uFF09\u8FFD\u52A0");
+        const childOptions = buildTargetOptions(existingKeys);
+        if (Object.keys(childOptions).length === 0) {
+          addChildSetting.setDesc("\u8FFD\u52A0\u3067\u304D\u308B\u30BF\u30D6\u304C\u3042\u308A\u307E\u305B\u3093");
+        } else {
+          addChildSetting.addDropdown((dropdown) => {
+            dropdown.addOption("", "\u8FFD\u52A0\u3059\u308B\u30BF\u30D6\u3092\u9078\u629E");
+            Object.entries(childOptions).forEach(([key, label]) => {
+              dropdown.addOption(key, label);
+            });
+            dropdown.onChange((value) => {
+              if (!value) {
+                return;
+              }
+              const target = navTargetFromKey(value);
+              if (!target) {
+                return;
+              }
+              const next = [...layout];
+              const children = [...group.children];
+              children.push({ label: getNavTargetLabel(target, templateLabels), target });
+              next[groupIndex] = { ...group, children };
+              persistLayout(next);
+            });
+          });
+        }
+        const addChildGroupSetting = new import_obsidian12.Setting(groupBlock).setName(
+          "2\u968E\u5C64\u76EE\uFF083\u968E\u5C64\u76EE\u3042\u308A\uFF09\u8FFD\u52A0"
+        );
+        addChildGroupSetting.addButton((button) => {
+          button.setButtonText("\u8FFD\u52A0");
+          button.onClick(() => {
+            const existing = new Set(group.children.map((child) => child.label));
+            const label = buildIndexedLabel("2\u968E\u5C64\u76EE", existing, 1);
+            const next = [...layout];
+            const children = [...group.children, { label, items: [] }];
+            next[groupIndex] = { ...group, children };
+            persistLayout(next);
           });
         });
       });
+      const addGroupSetting = new import_obsidian12.Setting(navWrap).setName("1\u968E\u5C64\u76EE\u8FFD\u52A0");
+      addGroupSetting.addButton((button) => {
+        button.setButtonText("\u8FFD\u52A0");
+        button.onClick(() => {
+          const existing = new Set(layout.map((group) => group.label));
+          const label = ensureUniqueLabel("\u65B0\u898F1\u968E\u5C64\u76EE", existing);
+          const next = [...layout, { label, children: [] }];
+          persistLayout(next);
+        });
+      });
+    };
+    this.renderTemplateSettings(templateSection, {
+      headingTag: "h4",
+      onTemplatesUpdated: renderNav
+    });
+    renderNav();
+  }
+};
+var TEMPLATE_FORMAT_OPTIONS = [
+  {
+    value: "free",
+    label: TEMPLATE_FORMAT_LABELS.free,
+    hint: "\u30DF\u30C3\u30B7\u30E7\u30F3\u306E\u3088\u3046\u306B\u81EA\u7531\u306B\u8A18\u5165\u3059\u308B\u5F62\u5F0F"
+  },
+  {
+    value: "pairs",
+    label: TEMPLATE_FORMAT_LABELS.pairs,
+    hint: "\u9805\u76EE\u3068\u5185\u5BB9\u3092\u30DA\u30A2\u3067\u8FFD\u52A0\u3059\u308B\u5F62\u5F0F"
+  },
+  {
+    value: "select",
+    label: TEMPLATE_FORMAT_LABELS.select,
+    hint: "\u9078\u629E\u80A2\u3068\u5185\u5BB9\u3092\u30DA\u30A2\u3067\u8FFD\u52A0\u3059\u308B\u5F62\u5F0F"
+  },
+  {
+    value: "list",
+    label: TEMPLATE_FORMAT_LABELS.list,
+    hint: "\u7B87\u6761\u66F8\u304D\u3067\u5185\u5BB9\u3092\u8FFD\u52A0\u3059\u308B\u5F62\u5F0F"
+  },
+  {
+    value: "qa",
+    label: TEMPLATE_FORMAT_LABELS.qa,
+    hint: "\u8CEA\u554F\u3068\u89E3\u7B54\u3092\u30BB\u30C3\u30C8\u3067\u66F8\u304F\u5F62\u5F0F"
+  }
+];
+var TEMPLATE_ID_PREFIX = "tpl";
+var parseSelectOptions = (raw) => raw.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+var buildTemplateId = (existingIds) => {
+  let id = "";
+  while (!id || existingIds.has(id)) {
+    const stamp = Date.now().toString(36);
+    const rand = Math.random().toString(36).slice(2, 8);
+    id = `${TEMPLATE_ID_PREFIX}-${stamp}-${rand}`;
+  }
+  return id;
+};
+var TemplateAddModal = class extends import_obsidian12.Modal {
+  constructor(app, existingLabels, existingIds, onSubmit) {
+    super(app);
+    this.existingLabels = new Set(existingLabels);
+    this.existingIds = new Set(existingIds);
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const content = this.contentEl;
+    content.empty();
+    content.createEl("h3", { text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u3092\u8FFD\u52A0" });
+    const form = content.createEl("div", { cls: "lifeplanner-form" });
+    const titleField = form.createEl("div", { cls: "lifeplanner-form-field" });
+    titleField.createEl("label", { text: "\u30BF\u30A4\u30C8\u30EB" });
+    const titleInput = titleField.createEl("input", { type: "text" });
+    const formatField = form.createEl("div", { cls: "lifeplanner-form-field" });
+    formatField.createEl("label", { text: "\u5F62\u5F0F" });
+    const formatSelect = formatField.createEl("select");
+    TEMPLATE_FORMAT_OPTIONS.forEach((option) => {
+      formatSelect.createEl("option", { text: option.label, value: option.value });
+    });
+    formatSelect.value = TEMPLATE_FORMAT_OPTIONS[0]?.value ?? "free";
+    const hint = formatField.createEl("div", { cls: "lifeplanner-form-hint" });
+    const optionsField = form.createEl("div", { cls: "lifeplanner-form-field" });
+    optionsField.createEl("label", { text: "\u9078\u629E\u80A2" });
+    const optionsInput = optionsField.createEl("textarea");
+    optionsInput.rows = 2;
+    optionsInput.placeholder = "\u4F8B: A, B, C";
+    const updateFormat = () => {
+      const selected = TEMPLATE_FORMAT_OPTIONS.find(
+        (option) => option.value === formatSelect.value
+      );
+      hint.setText(selected?.hint ?? "");
+      optionsField.classList.toggle("lifeplanner-hidden", formatSelect.value !== "select");
+    };
+    updateFormat();
+    formatSelect.addEventListener("change", updateFormat);
+    const error = content.createEl("div", { cls: "lifeplanner-form-error" });
+    const actions = content.createEl("div", { cls: "lifeplanner-modal-actions" });
+    const cancelButton = actions.createEl("button", { text: "\u30AD\u30E3\u30F3\u30BB\u30EB" });
+    cancelButton.setAttr("type", "button");
+    const submitButton = actions.createEl("button", { text: "\u8FFD\u52A0" });
+    submitButton.setAttr("type", "button");
+    const submit = async () => {
+      error.setText("");
+      const label = titleInput.value.trim();
+      if (!label) {
+        error.setText("\u30BF\u30A4\u30C8\u30EB\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+        return;
+      }
+      if (this.existingLabels.has(label.toLowerCase())) {
+        error.setText("\u540C\u3058\u30BF\u30A4\u30C8\u30EB\u304C\u65E2\u306B\u3042\u308A\u307E\u3059");
+        return;
+      }
+      const format = formatSelect.value;
+      let selectOptions;
+      if (format === "select") {
+        selectOptions = parseSelectOptions(optionsInput.value);
+        if (selectOptions.length === 0) {
+          error.setText("\u9078\u629E\u80A2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+          return;
+        }
+      }
+      const id = buildTemplateId(this.existingIds);
+      submitButton.disabled = true;
+      cancelButton.disabled = true;
+      await this.onSubmit({ id, label, format, selectOptions });
+      this.close();
+    };
+    submitButton.addEventListener("click", () => {
+      void submit();
+    });
+    cancelButton.addEventListener("click", () => {
+      this.close();
+    });
+    titleInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void submit();
+      }
+    });
+    titleInput.focus();
+  }
+};
+var TemplateEditModal = class extends import_obsidian12.Modal {
+  constructor(app, entry, onSubmit) {
+    super(app);
+    this.entry = { ...entry };
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const content = this.contentEl;
+    content.empty();
+    content.createEl("h3", { text: `\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u7DE8\u96C6: ${this.entry.label}` });
+    const form = content.createEl("div", { cls: "lifeplanner-form" });
+    const titleField = form.createEl("div", { cls: "lifeplanner-form-field" });
+    titleField.createEl("label", { text: "\u30BF\u30A4\u30C8\u30EB" });
+    const titleInput = titleField.createEl("input", { type: "text" });
+    titleInput.value = this.entry.label;
+    const formatField = form.createEl("div", { cls: "lifeplanner-form-field" });
+    formatField.createEl("label", { text: "\u5F62\u5F0F" });
+    formatField.createEl("div", {
+      cls: "lifeplanner-form-hint",
+      text: TEMPLATE_FORMAT_LABELS[this.entry.format]
+    });
+    const optionsField = form.createEl("div", { cls: "lifeplanner-form-field" });
+    optionsField.createEl("label", { text: "\u9078\u629E\u80A2" });
+    const optionsInput = optionsField.createEl("textarea");
+    optionsInput.rows = 2;
+    optionsInput.placeholder = "\u4F8B: A, B, C";
+    optionsInput.value = (this.entry.selectOptions ?? []).join(", ");
+    optionsField.classList.toggle("lifeplanner-hidden", this.entry.format !== "select");
+    const error = content.createEl("div", { cls: "lifeplanner-form-error" });
+    const actions = content.createEl("div", { cls: "lifeplanner-modal-actions" });
+    const cancelButton = actions.createEl("button", { text: "\u30AD\u30E3\u30F3\u30BB\u30EB" });
+    cancelButton.setAttr("type", "button");
+    const saveButton = actions.createEl("button", { text: "\u4FDD\u5B58" });
+    saveButton.setAttr("type", "button");
+    const save = async () => {
+      error.setText("");
+      const label = titleInput.value.trim();
+      if (!label) {
+        error.setText("\u30BF\u30A4\u30C8\u30EB\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+        return;
+      }
+      let selectOptions = this.entry.selectOptions;
+      if (this.entry.format === "select") {
+        selectOptions = parseSelectOptions(optionsInput.value);
+        if (selectOptions.length === 0) {
+          error.setText("\u9078\u629E\u80A2\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+          return;
+        }
+      }
+      saveButton.disabled = true;
+      cancelButton.disabled = true;
+      await this.onSubmit({ ...this.entry, label, selectOptions });
+      this.close();
+    };
+    saveButton.addEventListener("click", () => {
+      void save();
+    });
+    cancelButton.addEventListener("click", () => {
+      this.close();
+    });
+    titleInput.focus();
+  }
+};
+var TemplateDeleteModal = class extends import_obsidian12.Modal {
+  constructor(app, entry, onSubmit) {
+    super(app);
+    this.entry = entry;
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const content = this.contentEl;
+    content.empty();
+    content.createEl("h3", { text: `\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u3092\u524A\u9664: ${this.entry.label}` });
+    content.createEl("p", {
+      cls: "lifeplanner-settings-hint",
+      text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u306E\u8A2D\u5B9A\u3092\u524A\u9664\u3057\u307E\u3059\u3002\u30D5\u30A1\u30A4\u30EB\u3082\u524A\u9664\u3057\u307E\u3059\u304B\uFF1F"
+    });
+    const actions = content.createEl("div", { cls: "lifeplanner-modal-actions" });
+    const cancelButton = actions.createEl("button", { text: "\u30AD\u30E3\u30F3\u30BB\u30EB" });
+    cancelButton.setAttr("type", "button");
+    const keepButton = actions.createEl("button", { text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u306E\u307F\u524A\u9664" });
+    keepButton.setAttr("type", "button");
+    const deleteButton = actions.createEl("button", { text: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u3068\u30D5\u30A1\u30A4\u30EB\u3092\u524A\u9664" });
+    deleteButton.setAttr("type", "button");
+    cancelButton.addEventListener("click", () => {
+      this.close();
+    });
+    keepButton.addEventListener("click", () => {
+      void this.onSubmit(false);
+      this.close();
+    });
+    deleteButton.addEventListener("click", () => {
+      void this.onSubmit(true);
+      this.close();
     });
   }
 };
 
 // src/main.ts
-var LifePlannerPlugin = class extends import_obsidian12.Plugin {
+var LifePlannerPlugin = class extends import_obsidian13.Plugin {
   constructor() {
     super(...arguments);
     this.primaryLeaf = null;
@@ -5470,6 +7952,7 @@ var LifePlannerPlugin = class extends import_obsidian12.Plugin {
     this.registerView(GOALS_VIEW_TYPE, (leaf) => new GoalsView(leaf, this));
     this.registerView(GOAL_TASK_VIEW_TYPE, (leaf) => new GoalTaskView(leaf, this));
     this.registerView(EXERCISES_VIEW_TYPE, (leaf) => new ExercisesView(leaf, this));
+    this.registerView(TEMPLATE_SECTION_VIEW_TYPE, (leaf) => new TemplateSectionView(leaf, this));
     this.registerView(ISSUES_VIEW_TYPE, (leaf) => new IssuesView(leaf, this));
     this.registerView(
       MISSION_VIEW_TYPE,
@@ -5514,6 +7997,7 @@ var LifePlannerPlugin = class extends import_obsidian12.Plugin {
     this.app.workspace.detachLeavesOfType(GOALS_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(GOAL_TASK_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(EXERCISES_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(TEMPLATE_SECTION_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(ISSUES_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(MISSION_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(VALUES_VIEW_TYPE);
@@ -5533,6 +8017,58 @@ var LifePlannerPlugin = class extends import_obsidian12.Plugin {
     this.primaryLeaf = leaf;
     await leaf.setViewState({ type: viewType, active: true });
   }
+  getTemplateLabelMap() {
+    const entries = getAllTemplates(this.settings.customTemplates ?? []);
+    return new Map(entries.map((entry) => [entry.id, entry.label]));
+  }
+  async navigateToTarget(target, leaf) {
+    const targetLeaf = leaf ?? this.primaryLeaf ?? this.app.workspace.getLeaf(false);
+    this.primaryLeaf = targetLeaf;
+    if (target.type === "view") {
+      await this.openViewInLeaf(target.viewType, targetLeaf);
+      return;
+    }
+    if (target.type === "exercise") {
+      await this.openExerciseSection(target.section, targetLeaf);
+      return;
+    }
+    if (target.type === "template") {
+      await this.openTemplateTarget(target.templateId, targetLeaf);
+    }
+  }
+  async openExerciseSection(section, leaf) {
+    await this.openViewInLeaf(EXERCISES_VIEW_TYPE, leaf);
+    const view = leaf.view;
+    if (view instanceof ExercisesView) {
+      view.setActiveSection(section);
+      return;
+    }
+    window.setTimeout(() => {
+      const nextView = leaf.view;
+      if (nextView instanceof ExercisesView) {
+        nextView.setActiveSection(section);
+      }
+    }, 0);
+  }
+  async openTemplateTarget(templateId, leaf) {
+    const entry = getAllTemplates(this.settings.customTemplates ?? []).find(
+      (template) => template.id === templateId
+    );
+    if (!entry) {
+      new import_obsidian13.Notice("\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      return;
+    }
+    if ("viewType" in entry) {
+      await this.openViewInLeaf(entry.viewType, leaf);
+      return;
+    }
+    this.primaryLeaf = leaf;
+    await leaf.setViewState({
+      type: TEMPLATE_SECTION_VIEW_TYPE,
+      active: true,
+      state: { templateId }
+    });
+  }
   async loadSettings() {
     const data = await this.loadData();
     const merged = Object.assign({}, DEFAULT_SETTINGS, data);
@@ -5547,6 +8083,67 @@ var LifePlannerPlugin = class extends import_obsidian12.Plugin {
       const hasCustom = filtered.length > 0 || data.dashboardSections.length === 0;
       merged.dashboardSections = hasCustom ? filtered : [...DEFAULT_SETTINGS.dashboardSections];
     }
+    if (!Array.isArray(data?.customTemplates)) {
+      merged.customTemplates = [];
+    } else {
+      const allowedFormats = /* @__PURE__ */ new Set(["free", "pairs", "select", "list", "qa"]);
+      const builtinIds = new Set(DEFAULT_TEMPLATE_IDS);
+      const seenIds = /* @__PURE__ */ new Set();
+      const normalized = [];
+      data.customTemplates.forEach((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return;
+        }
+        const raw = entry;
+        const id = typeof raw.id === "string" ? raw.id.trim() : "";
+        const label = typeof raw.label === "string" ? raw.label.trim() : "";
+        const format = typeof raw.format === "string" ? raw.format : "";
+        if (!id || !label) {
+          return;
+        }
+        if (builtinIds.has(id) || seenIds.has(id)) {
+          return;
+        }
+        if (!allowedFormats.has(format)) {
+          return;
+        }
+        let selectOptions;
+        if (format === "select") {
+          selectOptions = Array.isArray(raw.selectOptions) ? raw.selectOptions.map((option) => typeof option === "string" ? option.trim() : "").filter((option) => option.length > 0) : [];
+          if (selectOptions.length === 0) {
+            return;
+          }
+        }
+        seenIds.add(id);
+        normalized.push({ id, label, format, selectOptions });
+      });
+      merged.customTemplates = normalized;
+    }
+    const templateIds = /* @__PURE__ */ new Set([
+      ...DEFAULT_TEMPLATE_IDS,
+      ...(merged.customTemplates ?? []).map((entry) => entry.id)
+    ]);
+    if (!Array.isArray(data?.enabledTemplates)) {
+      merged.enabledTemplates = Array.from(templateIds);
+    } else {
+      merged.enabledTemplates = data.enabledTemplates.filter(
+        (id) => typeof id === "string" && templateIds.has(id)
+      );
+    }
+    const defaultTemplateOrder = [
+      ...DEFAULT_TEMPLATE_IDS,
+      ...(merged.customTemplates ?? []).map((entry) => entry.id)
+    ];
+    if (!Array.isArray(data?.templateOrder)) {
+      merged.templateOrder = defaultTemplateOrder;
+    } else {
+      const filtered = data.templateOrder.filter(
+        (id) => typeof id === "string" && templateIds.has(id)
+      );
+      const missing = defaultTemplateOrder.filter((id) => !filtered.includes(id));
+      merged.templateOrder = [...filtered, ...missing];
+    }
+    merged.navLayout = normalizeNavLayout(data?.navLayout, { keepEmpty: true });
     this.settings = merged;
   }
   async saveSettings() {

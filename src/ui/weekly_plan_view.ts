@@ -12,7 +12,7 @@ import { parseWeeklyShared, serializeWeeklyShared } from "../services/weekly_sha
 import { resolveLifePlannerPath, resolveWeeklyPlanPath } from "../storage/path_resolver";
 import type LifePlannerPlugin from "../main";
 import { attachDeleteMenu, attachRowMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
-import { renderNavigation } from "./navigation";
+import { NavTarget, renderNavigation } from "./navigation";
 import { LifePlannerViewType, WEEKLY_PLAN_VIEW_TYPE } from "./view_types";
 export { WEEKLY_PLAN_VIEW_TYPE };
 
@@ -25,7 +25,7 @@ export type WeeklyPlanRenderOptions = {
   showNavigation?: boolean;
   showHeader?: boolean;
   attachMenuClose?: boolean;
-  onNavigate?: (viewType: LifePlannerViewType) => void;
+  onNavigate?: (target: NavTarget) => void;
   hiddenViewTypes?: LifePlannerViewType[];
 };
 
@@ -35,6 +35,7 @@ export class WeeklyPlanRenderer {
   private tasksService: TasksService;
   private inboxService: InboxService;
   private statusEl: HTMLElement | null = null;
+  private statusTimer: number | null = null;
   private rootEl: HTMLElement | null = null;
   private viewEl: HTMLElement | null = null;
   private disposeMenuClose: (() => void) | null = null;
@@ -88,6 +89,10 @@ export class WeeklyPlanRenderer {
 
   async onClose(): Promise<void> {
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.rootEl = null;
     this.viewEl = null;
     this.disposeMenuClose?.();
@@ -141,11 +146,25 @@ export class WeeklyPlanRenderer {
     }
 
     if (resolvedOptions.showNavigation) {
-      const onNavigate = resolvedOptions.onNavigate ?? (() => {});
-      renderNavigation(view, WEEKLY_PLAN_VIEW_TYPE, onNavigate, resolvedOptions.hiddenViewTypes);
+      const onNavigate =
+        resolvedOptions.onNavigate ??
+        ((target: NavTarget) => {
+          void this.plugin.navigateToTarget(target);
+        });
+      renderNavigation(
+        view,
+        WEEKLY_PLAN_VIEW_TYPE,
+        onNavigate,
+        resolvedOptions.hiddenViewTypes,
+        this.plugin.settings.navLayout,
+        {
+          templateLabels: this.plugin.getTemplateLabelMap(),
+          enabledTemplates: this.plugin.settings.enabledTemplates,
+        }
+      );
     }
 
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-weekly-status" });
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-weekly-status" });
 
     this.weekStart = computeWeekStart(new Date(), this.weekOffset, this.plugin.settings.weekStart);
     this.dayOrder = dayOrder(this.plugin.settings.weekStart);
@@ -158,6 +177,9 @@ export class WeeklyPlanRenderer {
     await this.renderDailyMemos(view);
     this.renderReflection(view, plan);
     this.updateWeekMeta();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
 
     if (prevButton) {
       prevButton.addEventListener("click", () => {
@@ -919,9 +941,15 @@ export class WeeklyPlanRenderer {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2000);
+      this.statusTimer = null;
+    }, 3500);
   }
 
   private scheduleTweetSave(itemId: string, content: string): void {
@@ -1003,8 +1031,8 @@ export class WeeklyPlanView extends ItemView {
       showNavigation: true,
       showHeader: true,
       attachMenuClose: true,
-      onNavigate: (viewType) => {
-        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      onNavigate: (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
       },
       hiddenViewTypes: this.plugin.settings.hiddenTabs,
     });
