@@ -322,6 +322,8 @@ export function renderNavigation(
   extras: NavigationExtras = {}
 ): void {
   const hiddenSet = new Set(hiddenViewTypes);
+  const hasEnabledTemplates = Array.isArray(extras.enabledTemplates);
+  const enabledTemplateSet = new Set(extras.enabledTemplates ?? []);
   const nav = container.createEl("div", { cls: "lifeplanner-nav" });
   const layout = normalizeNavLayout(navLayout);
   const templateLabels = extras.templateLabels;
@@ -339,6 +341,14 @@ export function renderNavigation(
   const isTargetVisible = (target: NavTarget): boolean => {
     const viewType = getNavTargetViewType(target);
     if (viewType && hiddenSet.has(viewType) && viewType !== activeViewType) {
+      return false;
+    }
+    if (
+      target.type === "template" &&
+      hasEnabledTemplates &&
+      !enabledTemplateSet.has(target.templateId) &&
+      target.templateId !== extras.activeTemplateId
+    ) {
       return false;
     }
     return true;

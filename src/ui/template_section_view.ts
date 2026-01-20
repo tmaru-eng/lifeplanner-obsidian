@@ -411,7 +411,11 @@ export class TemplateSectionView extends ItemView {
         availableOptions.forEach((option) => {
           keySelect.createEl("option", { text: option, value: option });
         });
-        keySelect.value = item.key || fallbackKey;
+        const selectedKey = item.key || fallbackKey;
+        keySelect.value = selectedKey;
+        if (!item.key && selectedKey) {
+          items[index].key = selectedKey;
+        }
         keySelect.addEventListener("change", () => {
           items[index].key = keySelect.value;
           persist(true);
