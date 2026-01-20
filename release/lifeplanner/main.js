@@ -3488,6 +3488,27 @@ function buildExerciseSectionTitles(customSections = []) {
   return titles;
 }
 
+// src/ui/i18n.ts
+var getPreferredLanguage = () => {
+  if (typeof document !== "undefined") {
+    const docLang = document.documentElement?.lang?.trim();
+    if (docLang) {
+      return docLang.toLowerCase();
+    }
+  }
+  if (typeof navigator !== "undefined") {
+    const navLang = navigator.language?.trim();
+    if (navLang) {
+      return navLang.toLowerCase();
+    }
+  }
+  return "ja";
+};
+var resolveLocalizedText = (text) => {
+  const lang = getPreferredLanguage();
+  return lang.startsWith("en") ? text.en : text.ja;
+};
+
 // src/ui/exercises_view.ts
 var ExercisesView = class extends import_obsidian4.ItemView {
   constructor(leaf, plugin) {
@@ -3508,7 +3529,7 @@ var ExercisesView = class extends import_obsidian4.ItemView {
     return EXERCISES_VIEW_TYPE;
   }
   getDisplayText() {
-    return "\u6F14\u7FD2";
+    return resolveLocalizedText({ ja: "\u6F14\u7FD2", en: "Exercises" });
   }
   async onOpen() {
     const container = this.contentEl;
@@ -3517,7 +3538,7 @@ var ExercisesView = class extends import_obsidian4.ItemView {
       cls: "lifeplanner-view lifeplanner-exercises-view"
     });
     enableTapToBlur(view);
-    view.createEl("h2", { text: "\u6F14\u7FD2" });
+    view.createEl("h2", { text: resolveLocalizedText({ ja: "\u6F14\u7FD2", en: "Exercises" }) });
     const exerciseSections = this.buildExerciseSections();
     const exerciseSectionTitles = exerciseSections.map((section) => section.title).filter(Boolean);
     if (exerciseSectionTitles.length > 0 && !exerciseSectionTitles.includes(this.activeSectionTitle)) {
@@ -6330,7 +6351,7 @@ var TemplateSectionView = class extends import_obsidian11.ItemView {
     return TEMPLATE_SECTION_VIEW_TYPE;
   }
   getDisplayText() {
-    return this.template?.label ?? "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8";
+    return this.template?.label ?? resolveLocalizedText({ ja: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8", en: "Template" });
   }
   getState() {
     return { templateId: this.templateId };
@@ -6374,7 +6395,7 @@ var TemplateSectionView = class extends import_obsidian11.ItemView {
     this.disposeMenuClose = registerRowMenuClose(view);
     const template = this.findTemplate();
     this.template = template;
-    const title = template?.label ?? "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8";
+    const title = template?.label ?? resolveLocalizedText({ ja: "\u30C6\u30F3\u30D7\u30EC\u30FC\u30C8", en: "Template" });
     view.createEl("h2", { text: title });
     renderNavigation(
       view,
