@@ -23,6 +23,7 @@ export class GoalsView extends ItemView {
   private goalsService: GoalsService;
   private listEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
+  private statusTimer: number | null = null;
   private parentSelect: HTMLSelectElement | null = null;
   private descriptionInput: HTMLTextAreaElement | null = null;
   private goals: Goal[] = [];
@@ -56,9 +57,19 @@ export class GoalsView extends ItemView {
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     enableTapToBlur(view);
     view.createEl("h2", { text: "目標" });
-    renderNavigation(view, GOALS_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
+    renderNavigation(
+      view,
+      GOALS_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+      }
+    );
 
     const formWrap = view.createEl("div", { cls: "lifeplanner-goals-form-wrap" });
     this.formWrapEl = formWrap;
@@ -112,7 +123,7 @@ export class GoalsView extends ItemView {
     actionField.createEl("label", { text: " " });
     const addButton = actionField.createEl("button", { text: "追加" });
 
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-goals-status" });
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-goals-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-goals-list" });
 
     let lastAutoDue = resolveDefaultDueDate(levelSelect.value as GoalLevel);
@@ -176,11 +187,18 @@ export class GoalsView extends ItemView {
 
     await this.renderGoals();
     await this.populateParents();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
 
   async onClose(): Promise<void> {
     this.listEl = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.parentSelect = null;
     this.descriptionInput = null;
     this.goals = [];
@@ -528,9 +546,15 @@ export class GoalsView extends ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2000);
+      this.statusTimer = null;
+    }, 3500);
   }
 
   private async handleToggleExpanded(node: GoalNode, expanded: boolean): Promise<void> {

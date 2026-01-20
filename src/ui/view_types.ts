@@ -9,6 +9,7 @@ export const MISSION_VIEW_TYPE = "lifeplanner-mission";
 export const HAVE_DO_BE_VIEW_TYPE = "lifeplanner-have-do-be";
 export const PROMISE_VIEW_TYPE = "lifeplanner-promise";
 export const VALUES_VIEW_TYPE = "lifeplanner-values";
+export const TEMPLATE_SECTION_VIEW_TYPE = "lifeplanner-template";
 
 export type LifePlannerViewType =
   | typeof DASHBOARD_VIEW_TYPE
@@ -21,4 +22,5 @@ export type LifePlannerViewType =
   | typeof MISSION_VIEW_TYPE
   | typeof VALUES_VIEW_TYPE
   | typeof HAVE_DO_BE_VIEW_TYPE
-  | typeof PROMISE_VIEW_TYPE;
+  | typeof PROMISE_VIEW_TYPE
+  | typeof TEMPLATE_SECTION_VIEW_TYPE;

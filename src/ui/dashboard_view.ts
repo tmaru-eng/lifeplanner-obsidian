@@ -48,6 +48,7 @@ export class DashboardView extends ItemView {
   private embeddedWeekly: WeeklyPlanRenderer | null = null;
   private disposeMenuClose: (() => void) | null = null;
   private statusEl: HTMLElement | null = null;
+  private statusTimer: number | null = null;
   private showControls = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: LifePlannerPlugin) {
@@ -72,6 +73,10 @@ export class DashboardView extends ItemView {
     this.disposeMenuClose?.();
     this.disposeMenuClose = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.showControls = false;
     this.contentEl.empty();
   }
@@ -136,13 +141,20 @@ export class DashboardView extends ItemView {
     renderNavigation(
       view,
       DASHBOARD_VIEW_TYPE,
-      (viewType) => {
-        void this.plugin.openViewInLeaf(viewType, this.leaf);
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
       },
-      this.plugin.settings.hiddenTabs
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+      }
     );
 
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-dashboard-status" });
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-dashboard-status",
+    });
 
     const selected = new Set(this.plugin.settings.dashboardSections);
     const controls = view.createEl("div", { cls: "lifeplanner-dashboard-controls" });
@@ -208,6 +220,9 @@ export class DashboardView extends ItemView {
     if (orderedSections.length === 0 && !this.plugin.settings.showDashboardCalendar) {
       const empty = grid.createEl("div", { cls: "lifeplanner-dashboard-empty" });
       empty.setText("表示するセクションを選択してください。");
+      if (this.statusEl) {
+        view.appendChild(this.statusEl);
+      }
       return;
     }
 
@@ -215,6 +230,9 @@ export class DashboardView extends ItemView {
       const includeHeader = section.viewType !== WEEKLY_PLAN_VIEW_TYPE;
       const body = this.createSection(grid, section.label, includeHeader);
       await this.renderSection(section.viewType, body, services);
+    }
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
     }
   }
 
@@ -716,8 +734,14 @@ export class DashboardView extends ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2000);
+      this.statusTimer = null;
+    }, 3500);
   }
 }

@@ -2,6 +2,7 @@ import { ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
 import type LifePlannerPlugin from "../main";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { SimpleSectionService } from "../services/simple_section_service";
+import { BUILTIN_TEMPLATE_BY_VIEW } from "../services/section_templates";
 import { attachRowMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { LifePlannerViewType } from "./view_types";
@@ -55,9 +56,20 @@ export class SimpleSectionView extends ItemView {
     this.disposeMenuClose = registerRowMenuClose(view);
     const header = view.createEl("div", { cls: "lifeplanner-simple-section-header" });
     header.createEl("h2", { text: this.titleText });
-    renderNavigation(view, this.viewType, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
+    renderNavigation(
+      view,
+      this.viewType,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+        activeTemplateId: BUILTIN_TEMPLATE_BY_VIEW.get(this.viewType),
+      }
+    );
     const body = view.createEl("div", { cls: "lifeplanner-simple-section-body" });
     const hero = body.createEl("div", { cls: "lifeplanner-simple-section-hero" });
     const actions = hero.createEl("div", { cls: "lifeplanner-simple-section-actions" });
@@ -65,7 +77,9 @@ export class SimpleSectionView extends ItemView {
       cls: "lifeplanner-simple-section-display lifeplanner-markdown",
     });
     this.inputEl = hero.createEl("textarea", { cls: "lifeplanner-simple-section-input" });
-    this.statusEl = hero.createEl("div", { cls: "lifeplanner-simple-section-status" });
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-simple-section-status",
+    });
     this.inputEl.rows = 12;
     this.inputEl.value = await this.service.load();
 
@@ -127,6 +141,9 @@ export class SimpleSectionView extends ItemView {
 
     updateDisplay();
     setEditMode(false);
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
 
   async onClose(): Promise<void> {
@@ -147,10 +164,12 @@ export class SimpleSectionView extends ItemView {
       return;
     }
     this.statusEl.setText(message);
+    this.statusEl.classList.add("is-visible");
     if (this.statusTimer) {
       window.clearTimeout(this.statusTimer);
     }
     this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
       this.statusTimer = null;
     }, 3500);

@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 import type LifePlannerPlugin from "../main";
 import { MarkdownRepository } from "../services/markdown_repository";
 import { TableColumn, TableSectionService } from "../services/table_section_service";
+import { BUILTIN_TEMPLATE_BY_VIEW } from "../services/section_templates";
 import { attachDeleteMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
 import { renderNavigation } from "./navigation";
 import { LifePlannerViewType } from "./view_types";
@@ -13,6 +14,7 @@ export class TableSectionView extends ItemView {
   private service: TableSectionService;
   private columns: TableColumn[];
   private statusEl: HTMLElement | null = null;
+  private statusTimer: number | null = null;
   private rows: string[][] = [];
   private tableEl: HTMLElement | null = null;
   private sectionType: string;
@@ -60,15 +62,29 @@ export class TableSectionView extends ItemView {
     enableTapToBlur(view);
     this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: this.titleText });
-    renderNavigation(view, this.viewType, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-exercises-status" });
+    renderNavigation(
+      view,
+      this.viewType,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+        activeTemplateId: BUILTIN_TEMPLATE_BY_VIEW.get(this.viewType),
+      }
+    );
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-table-status" });
     const header = view.createEl("div", { cls: "lifeplanner-table-actions" });
     const addButton = header.createEl("button", { text: "追加" });
     this.tableEl = view.createEl("div", { cls: "lifeplanner-table-grid" });
     this.tableEl.dataset.sectionType = this.sectionType;
     await this.renderTable();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
     addButton.addEventListener("click", () => {
       this.rows.push([]);
       void this.save();
@@ -78,6 +94,10 @@ export class TableSectionView extends ItemView {
 
   async onClose(): Promise<void> {
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.tableEl = null;
     this.rows = [];
     this.viewEl = null;
@@ -211,8 +231,14 @@ export class TableSectionView extends ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2000);
+      this.statusTimer = null;
+    }, 3500);
   }
 }

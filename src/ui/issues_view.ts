@@ -18,6 +18,7 @@ export class IssuesView extends ItemView {
   private goalsService: GoalsService;
   private listEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
+  private statusTimer: number | null = null;
   private issues: Issue[] = [];
   private handleMenuClose: ((event: MouseEvent) => void) | null = null;
 
@@ -51,10 +52,20 @@ export class IssuesView extends ItemView {
     const view = container.createEl("div", { cls: "lifeplanner-view" });
     enableTapToBlur(view);
     view.createEl("h2", { text: "イシュー" });
-    renderNavigation(view, ISSUES_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-issues-status" });
+    renderNavigation(
+      view,
+      ISSUES_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+      }
+    );
+    this.statusEl = view.createEl("div", { cls: "lifeplanner-status lifeplanner-issues-status" });
     this.listEl = view.createEl("div", { cls: "lifeplanner-kanban" });
     this.handleMenuClose = (event: MouseEvent) => {
       const target = event.target as Node | null;
@@ -67,12 +78,19 @@ export class IssuesView extends ItemView {
     };
     document.addEventListener("mousedown", this.handleMenuClose, true);
     await this.renderBoard();
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
   }
 
   async onClose(): Promise<void> {
     this.listEl = null;
     this.statusEl = null;
     this.issues = [];
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     if (this.handleMenuClose) {
       document.removeEventListener("mousedown", this.handleMenuClose, true);
       this.handleMenuClose = null;
@@ -240,9 +258,15 @@ export class IssuesView extends ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2000);
+      this.statusTimer = null;
+    }, 3500);
   }
 }
 

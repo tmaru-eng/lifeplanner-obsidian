@@ -14,6 +14,7 @@ export class GoalTaskView extends ItemView {
   private tasksService: TasksService;
   private listEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
+  private statusTimer: number | null = null;
   private viewEl: HTMLElement | null = null;
   private disposeMenuClose: (() => void) | null = null;
   private taskRows: {
@@ -57,11 +58,23 @@ export class GoalTaskView extends ItemView {
     enableTapToBlur(view);
     this.disposeMenuClose = registerRowMenuClose(view);
     view.createEl("h2", { text: "アクションプラン" });
-    renderNavigation(view, GOAL_TASK_VIEW_TYPE, (viewType) => {
-      void this.plugin.openViewInLeaf(viewType, this.leaf);
-    }, this.plugin.settings.hiddenTabs);
+    renderNavigation(
+      view,
+      GOAL_TASK_VIEW_TYPE,
+      (target) => {
+        void this.plugin.navigateToTarget(target, this.leaf);
+      },
+      this.plugin.settings.hiddenTabs,
+      this.plugin.settings.navLayout,
+      {
+        templateLabels: this.plugin.getTemplateLabelMap(),
+        enabledTemplates: this.plugin.settings.enabledTemplates,
+      }
+    );
 
-    this.statusEl = view.createEl("div", { cls: "lifeplanner-goal-task-status" });
+    this.statusEl = view.createEl("div", {
+      cls: "lifeplanner-status lifeplanner-goal-task-status",
+    });
     const section = view.createEl("div", {
       cls: "lifeplanner-weekly-section lifeplanner-action-plan-section",
     });
@@ -85,6 +98,9 @@ export class GoalTaskView extends ItemView {
     });
 
     const listContext = await this.renderTasks(this.listEl, hiddenList, hiddenWrap, hiddenToggle);
+    if (this.statusEl) {
+      view.appendChild(this.statusEl);
+    }
 
     addButton.addEventListener("click", (event) => {
       event.preventDefault();
@@ -98,6 +114,10 @@ export class GoalTaskView extends ItemView {
   async onClose(): Promise<void> {
     this.listEl = null;
     this.statusEl = null;
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.viewEl = null;
     this.disposeMenuClose?.();
     this.disposeMenuClose = null;
@@ -261,8 +281,14 @@ export class GoalTaskView extends ItemView {
       return;
     }
     this.statusEl.setText(message);
-    window.setTimeout(() => {
+    this.statusEl.classList.add("is-visible");
+    if (this.statusTimer) {
+      window.clearTimeout(this.statusTimer);
+    }
+    this.statusTimer = window.setTimeout(() => {
+      this.statusEl?.classList.remove("is-visible");
       this.statusEl?.setText("");
-    }, 2000);
+      this.statusTimer = null;
+    }, 3500);
   }
 }
