@@ -4,6 +4,7 @@ import { MarkdownRepository } from "../services/markdown_repository";
 import type { CustomTemplateDefinition } from "../services/section_templates";
 import { TemplateSectionService } from "../services/template_section_service";
 import { attachDeleteMenu, attachRowMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
+import { resolveLocalizedText } from "./i18n";
 import { renderNavigation } from "./navigation";
 import { TEMPLATE_SECTION_VIEW_TYPE } from "./view_types";
 
@@ -44,7 +45,7 @@ export class TemplateSectionView extends ItemView {
   }
 
   getDisplayText(): string {
-    return this.template?.label ?? "テンプレート";
+    return this.template?.label ?? resolveLocalizedText({ ja: "テンプレート", en: "Template" });
   }
 
   getState(): TemplateViewState {
@@ -96,7 +97,8 @@ export class TemplateSectionView extends ItemView {
 
     const template = this.findTemplate();
     this.template = template;
-    const title = template?.label ?? "テンプレート";
+    const title =
+      template?.label ?? resolveLocalizedText({ ja: "テンプレート", en: "Template" });
 
     view.createEl("h2", { text: title });
     renderNavigation(

@@ -6,6 +6,7 @@ import { BASE_EXERCISE_SECTIONS, ExerciseSection } from "../services/exercise_se
 import { BUILTIN_TEMPLATE_BY_VIEW } from "../services/section_templates";
 import type LifePlannerPlugin from "../main";
 import { attachDeleteMenu, enableTapToBlur, registerRowMenuClose } from "./interaction";
+import { resolveLocalizedText } from "./i18n";
 import { renderNavigation } from "./navigation";
 import { EXERCISES_VIEW_TYPE } from "./view_types";
 export { EXERCISES_VIEW_TYPE };
@@ -44,7 +45,7 @@ export class ExercisesView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "演習";
+    return resolveLocalizedText({ ja: "演習", en: "Exercises" });
   }
 
   async onOpen(): Promise<void> {
@@ -55,7 +56,7 @@ export class ExercisesView extends ItemView {
       cls: "lifeplanner-view lifeplanner-exercises-view",
     });
     enableTapToBlur(view);
-    view.createEl("h2", { text: "演習" });
+    view.createEl("h2", { text: resolveLocalizedText({ ja: "演習", en: "Exercises" }) });
     const exerciseSections = this.buildExerciseSections();
     const exerciseSectionTitles = exerciseSections.map((section) => section.title).filter(Boolean);
     if (
