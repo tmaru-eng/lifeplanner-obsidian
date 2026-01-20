@@ -1170,7 +1170,7 @@ var TEMPLATE_FORMAT_LABELS = {
   pairs: "\u9805\u76EE/\u5185\u5BB9",
   select: "\u9078\u629E/\u5185\u5BB9",
   list: "\u30EA\u30B9\u30C8",
-  qa: "\u8CEA\u554F/\u56DE\u7B54"
+  qa: "\u8CEA\u554F/\u89E3\u7B54"
 };
 function getAllTemplates(customTemplates = []) {
   return [...BUILTIN_TEMPLATES, ...customTemplates];
@@ -1252,7 +1252,16 @@ function navChildHasItems(child) {
   return Array.isArray(child.items);
 }
 function getNavTargetViewType(target) {
-  return target.type === "view" ? target.viewType : null;
+  if (target.type === "view") {
+    return target.viewType;
+  }
+  if (target.type === "exercise") {
+    return EXERCISES_VIEW_TYPE;
+  }
+  if (target.type === "template") {
+    return BUILTIN_TEMPLATE_BY_ID.get(target.templateId)?.viewType ?? null;
+  }
+  return null;
 }
 function getNavTargetLabel(target, templateLabels) {
   switch (target.type) {
@@ -3959,7 +3968,7 @@ var ExercisesView = class extends import_obsidian4.ItemView {
       }
       const separatorIndex = value.indexOf(":");
       if (separatorIndex === -1) {
-        items.push({ key: value, value: "" });
+        items.push({ key: "", value });
         continue;
       }
       const key = value.slice(0, separatorIndex).trim();
@@ -6757,7 +6766,7 @@ var TemplateSectionView = class extends import_obsidian11.ItemView {
       }
       const separatorIndex = value.indexOf(":");
       if (separatorIndex === -1) {
-        items.push({ key: value, value: "" });
+        items.push({ key: "", value });
         continue;
       }
       const key = value.slice(0, separatorIndex).trim();
