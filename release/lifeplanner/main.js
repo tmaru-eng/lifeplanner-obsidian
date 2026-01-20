@@ -1403,6 +1403,8 @@ var lastVisitedByGroup = {};
 var lastVisitedByChild = {};
 function renderNavigation(container, activeViewType, onNavigate, hiddenViewTypes = [], navLayout, extras = {}) {
   const hiddenSet = new Set(hiddenViewTypes);
+  const hasEnabledTemplates = Array.isArray(extras.enabledTemplates);
+  const enabledTemplateSet = new Set(extras.enabledTemplates ?? []);
   const nav = container.createEl("div", { cls: "lifeplanner-nav" });
   const layout = normalizeNavLayout(navLayout);
   const templateLabels = extras.templateLabels;
@@ -1415,6 +1417,9 @@ function renderNavigation(container, activeViewType, onNavigate, hiddenViewTypes
   const isTargetVisible = (target) => {
     const viewType = getNavTargetViewType(target);
     if (viewType && hiddenSet.has(viewType) && viewType !== activeViewType) {
+      return false;
+    }
+    if (target.type === "template" && hasEnabledTemplates && !enabledTemplateSet.has(target.templateId) && target.templateId !== extras.activeTemplateId) {
       return false;
     }
     return true;
@@ -6649,7 +6654,11 @@ var TemplateSectionView = class extends import_obsidian11.ItemView {
         availableOptions.forEach((option) => {
           keySelect.createEl("option", { text: option, value: option });
         });
-        keySelect.value = item.key || fallbackKey;
+        const selectedKey = item.key || fallbackKey;
+        keySelect.value = selectedKey;
+        if (!item.key && selectedKey) {
+          items[index].key = selectedKey;
+        }
         keySelect.addEventListener("change", () => {
           items[index].key = keySelect.value;
           persist(true);
