@@ -14,10 +14,7 @@
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.lifeplanner-nav.has-tabs {
-  border-bottom: none;
-}
-
+.lifeplanner-nav.has-tabs,
 .lifeplanner-exercises-view .lifeplanner-nav {
   border-bottom: none;
 }

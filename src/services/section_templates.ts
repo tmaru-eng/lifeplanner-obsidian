@@ -71,7 +71,7 @@ export const TEMPLATE_FORMAT_LABELS: Record<TemplateFormat, string> = {
   pairs: "項目/内容",
   select: "選択/内容",
   list: "リスト",
-  qa: "質問/回答",
+  qa: "質問/解答",
 };
 
 export function getAllTemplates(

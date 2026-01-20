@@ -128,7 +128,16 @@ export function navChildHasItems(
 }
 
 export function getNavTargetViewType(target: NavTarget): LifePlannerViewType | null {
-  return target.type === "view" ? target.viewType : null;
+  if (target.type === "view") {
+    return target.viewType;
+  }
+  if (target.type === "exercise") {
+    return EXERCISES_VIEW_TYPE;
+  }
+  if (target.type === "template") {
+    return BUILTIN_TEMPLATE_BY_ID.get(target.templateId)?.viewType ?? null;
+  }
+  return null;
 }
 
 export function getNavTargetLabel(

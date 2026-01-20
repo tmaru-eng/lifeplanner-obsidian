@@ -539,7 +539,7 @@ export class TemplateSectionView extends ItemView {
       }
       const separatorIndex = value.indexOf(":");
       if (separatorIndex === -1) {
-        items.push({ key: value, value: "" });
+        items.push({ key: "", value });
         continue;
       }
       const key = value.slice(0, separatorIndex).trim();
